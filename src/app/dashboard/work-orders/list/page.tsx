@@ -1360,25 +1360,27 @@ export default function WorkOrdersListPage() {
 
             {/* Filter Row */}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              {/* Company Filter */}
-              <div>
-                <label htmlFor="filter-company" className="block text-sm font-medium text-foreground mb-2">
-                  Company
-                </label>
-                <select
-                  id="filter-company"
-                  value={filterCompany}
-                  onChange={(e) => setFilterCompany(e.target.value)}
-                  className="block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
-                >
-                  <option value="">All Companies</option>
-                  {uniqueCompanies.map((company) => (
-                    <option key={company} value={company}>
-                      {company}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Company Filter - Hidden for Admin and Super Admin */}
+              {(roleName !== 'Admin' && roleName !== 'Super Admin') && (
+                <div>
+                  <label htmlFor="filter-company" className="block text-sm font-medium text-foreground mb-2">
+                    Company
+                  </label>
+                  <select
+                    id="filter-company"
+                    value={filterCompany}
+                    onChange={(e) => setFilterCompany(e.target.value)}
+                    className="block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
+                  >
+                    <option value="">All Companies</option>
+                    {uniqueCompanies.map((company) => (
+                      <option key={company} value={company}>
+                        {company}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Sales Executive Filter (only for Admin/Super Admin) */}
               {roleName !== 'Sales' && (
@@ -1472,9 +1474,11 @@ export default function WorkOrdersListPage() {
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground opacity-70">
                       Phone
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground opacity-70">
-                      Company
-                    </th>
+                    {(roleName !== 'Admin' && roleName !== 'Super Admin') && (
+                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground opacity-70">
+                        Company
+                      </th>
+                    )}
                     {roleName !== 'Sales' && (
                       <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground opacity-70">
                         Sales Executive
@@ -1555,9 +1559,11 @@ export default function WorkOrdersListPage() {
                       <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
                         {order.customer_phone}
                       </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
-                        {order.company_name || 'N/A'}
-                      </td>
+                      {(roleName !== 'Admin' && roleName !== 'Super Admin') && (
+                        <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
+                          {order.company_name || 'N/A'}
+                        </td>
+                      )}
                       {roleName !== 'Sales' && (
                         <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
                           {order.sales_executive_name || 'N/A'}
@@ -1713,10 +1719,12 @@ export default function WorkOrdersListPage() {
                         <label className="block text-sm font-semibold text-[#1E1E1E] opacity-80 mb-1">Customer Phone</label>
                         <p className="text-base text-[#1E1E1E] font-medium">{selectedWorkOrder.customer_phone}</p>
                       </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-[#1E1E1E] opacity-80 mb-1">Company</label>
-                        <p className="text-base text-[#1E1E1E] font-medium">{selectedWorkOrder.company_name || 'N/A'}</p>
-                      </div>
+                      {(roleName !== 'Admin' && roleName !== 'Super Admin') && (
+                        <div>
+                          <label className="block text-sm font-semibold text-[#1E1E1E] opacity-80 mb-1">Company</label>
+                          <p className="text-base text-[#1E1E1E] font-medium">{selectedWorkOrder.company_name || 'N/A'}</p>
+                        </div>
+                      )}
                       {roleName !== 'Sales' && (
                         <div>
                           <label className="block text-sm font-semibold text-[#1E1E1E] opacity-80 mb-1">Sales Executive</label>

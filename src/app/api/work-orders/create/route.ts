@@ -111,10 +111,10 @@ export async function POST(request: NextRequest) {
     if (workOrder) {
       try {
         // Fetch sales executive details
-        const salesExecutive = await getSalesExecutive(sales_executive_id, supabase);
+        const salesExecutive = await getSalesExecutive(sales_executive_id, supabase as any);
         
         // Fetch admin users
-        const adminUsers = await getAdminUsers(company_id, supabase);
+        const adminUsers = await getAdminUsers(company_id, supabase as any);
 
         // Get payment received (initially 0 for new work order)
         const paymentReceived = 0;

@@ -19,7 +19,7 @@ export interface UserWithPhone {
  */
 export async function getAdminUsers(
   companyId: string,
-  supabase: ReturnType<typeof createClient>
+  supabase: ReturnType<typeof createClient> | any
 ): Promise<UserWithPhone[]> {
   try {
     const { data: admins, error } = await supabase
@@ -78,7 +78,7 @@ export async function getAdminUsers(
  */
 export async function getSalesExecutive(
   salesExecutiveId: string,
-  supabase: ReturnType<typeof createClient>
+  supabase: ReturnType<typeof createClient> | any
 ): Promise<UserWithPhone | null> {
   try {
     const { data: salesExec, error } = await supabase
@@ -102,9 +102,9 @@ export async function getSalesExecutive(
     }
 
     return {
-      id: salesExec.id,
-      full_name: salesExec.full_name,
-      phone: salesExec.phone_number, // Map phone_number to phone for interface compatibility
+      id: (salesExec as any).id,
+      full_name: (salesExec as any).full_name,
+      phone: (salesExec as any).phone_number, // Map phone_number to phone for interface compatibility
       email,
     };
   } catch (error) {
@@ -119,7 +119,7 @@ export async function getSalesExecutive(
  */
 export async function getInventoryUsers(
   companyId: string,
-  supabase: ReturnType<typeof createClient>
+  supabase: ReturnType<typeof createClient> | any
 ): Promise<UserWithPhone[]> {
   try {
     const { data: inventoryUsers, error } = await supabase

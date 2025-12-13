@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
 
     // Fetch sales executive for contact info
     const salesExecutive = workOrder.sales_executive_id
-      ? await (await import('@/utils/whatsapp-helpers')).getSalesExecutive(workOrder.sales_executive_id, supabase)
+      ? await (await import('@/utils/whatsapp-helpers')).getSalesExecutive(workOrder.sales_executive_id, supabase as any)
       : null;
 
     // Prepare work order data
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
       payment_received: totalPaid,
       plant_capacity: workOrder.plant_capacity,
       executive_name: salesExecutive?.full_name,
-      executive_contact: salesExecutive?.phone,
+      executive_contact: salesExecutive?.phone || undefined, // Convert null to undefined
       site_details: workOrder.site_details,
       customer_address: workOrder.customer_address,
       customer_phone: workOrder.customer_phone,
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Send to admin users (separate message for admin/sales)
-      const adminUsers = await getAdminUsers(workOrder.company_id, supabase);
+      const adminUsers = await getAdminUsers(workOrder.company_id, supabase as any);
       if (adminUsers.length > 0) {
         const adminMessage = getAdminSalesToBeDispatchedMessage(workOrderData);
         const adminResults = await sendWhatsAppToUsers(adminUsers, adminMessage);
@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Send to inventory users
-      const inventoryUsers = await getInventoryUsers(workOrder.company_id, supabase);
+      const inventoryUsers = await getInventoryUsers(workOrder.company_id, supabase as any);
       if (inventoryUsers.length > 0) {
         const inventoryMessage = getAdminToBeDispatchedMessage(workOrderData);
         const inventoryResults = await sendWhatsAppToUsers(inventoryUsers, inventoryMessage);

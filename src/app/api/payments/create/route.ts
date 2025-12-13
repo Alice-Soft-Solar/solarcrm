@@ -241,7 +241,7 @@ export async function POST(request: NextRequest) {
           const { getCustomerToBeDispatchedMessage, getAdminToBeDispatchedMessage, getAdminSalesToBeDispatchedMessage } = await import('@/utils/whatsapp-templates');
           
           const salesExecutive = fullWorkOrder.sales_executive_id
-            ? await getSalesExecutive(fullWorkOrder.sales_executive_id, supabase)
+            ? await getSalesExecutive(fullWorkOrder.sales_executive_id, supabase as any)
             : null;
 
           // Prepare work order data
@@ -252,7 +252,7 @@ export async function POST(request: NextRequest) {
             payment_received: newTotalPaid,
             plant_capacity: fullWorkOrder.plant_capacity,
             executive_name: salesExecutive?.full_name,
-            executive_contact: salesExecutive?.phone,
+            executive_contact: salesExecutive?.phone || undefined, // Convert null to undefined
             site_details: fullWorkOrder.site_details,
             customer_address: fullWorkOrder.customer_address,
             customer_phone: fullWorkOrder.customer_phone,
@@ -268,7 +268,7 @@ export async function POST(request: NextRequest) {
           }
 
           // Send to admin users (separate message for admin/sales)
-          const adminUsers = await getAdminUsers(fullWorkOrder.company_id, supabase);
+          const adminUsers = await getAdminUsers(fullWorkOrder.company_id, supabase as any);
           if (adminUsers.length > 0) {
             const adminMessage = getAdminSalesToBeDispatchedMessage(workOrderData);
             await sendWhatsAppToUsers(adminUsers, adminMessage).catch(err => console.error('Admin WhatsApp error:', err));
@@ -281,7 +281,7 @@ export async function POST(request: NextRequest) {
           }
 
           // Send to inventory users (detailed dispatch info)
-          const inventoryUsers = await getInventoryUsers(fullWorkOrder.company_id, supabase);
+          const inventoryUsers = await getInventoryUsers(fullWorkOrder.company_id, supabase as any);
           if (inventoryUsers.length > 0) {
             const inventoryMessage = getAdminToBeDispatchedMessage(workOrderData);
             await sendWhatsAppToUsers(inventoryUsers, inventoryMessage).catch(err => console.error('Inventory WhatsApp error:', err));

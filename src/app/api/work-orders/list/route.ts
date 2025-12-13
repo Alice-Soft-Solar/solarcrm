@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { userId, companyId, roleName } = body;
+    const { userId, companyId, roleName, page = 1, limit = 50 } = body;
 
     if (!userId) {
       return NextResponse.json(
@@ -84,6 +84,14 @@ export async function POST(request: NextRequest) {
         work_order_status
       `)
       .order('created_at', { ascending: false });
+
+    // Add pagination
+    const pageSize = Math.min(Math.max(parseInt(limit) || 50, 1), 100); // Limit between 1-100
+    const pageNumber = Math.max(parseInt(page) || 1, 1);
+    const from = (pageNumber - 1) * pageSize;
+    const to = from + pageSize - 1;
+    
+    query = query.range(from, to);
 
     // Filter based on role
     if (roleName === 'Sales') {
@@ -286,8 +294,35 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Get total count for pagination (without limit)
+    let countQuery = supabase
+      .from('work_orders')
+      .select('id', { count: 'exact', head: true });
+
+    // Apply same filters for count
+    if (roleName === 'Sales') {
+      countQuery = countQuery.eq('sales_executive_id', userId);
+    } else if (roleName === 'Inventory') {
+      if (companyId) {
+        countQuery = countQuery.eq('company_id', companyId);
+      }
+      countQuery = countQuery.or('work_order_status.eq.To Be Dispatched,work_order_status.eq.Dispatched,work_order_status.is.null');
+    } else if (roleName === 'Admin' || roleName === 'Super Admin') {
+      if (companyId) {
+        countQuery = countQuery.eq('company_id', companyId);
+      }
+    }
+
+    const { count } = await countQuery;
+
     return NextResponse.json({
       workOrders: transformedData,
+      pagination: {
+        page: pageNumber,
+        limit: pageSize,
+        total: count || 0,
+        totalPages: Math.ceil((count || 0) / pageSize),
+      },
     });
   } catch (error: unknown) {
     console.error('API Error fetching work orders:', error);

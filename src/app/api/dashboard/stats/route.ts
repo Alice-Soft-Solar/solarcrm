@@ -147,36 +147,55 @@ export async function POST(request: NextRequest) {
     }
 
     // Calculate work order statuses (handle NULL statuses)
-    const workOrdersWithStatus = await Promise.all(
-      filteredWorkOrders.map(async (order: any) => {
-        if (order.work_order_status) {
-          return { ...order, status: order.work_order_status };
-        }
+    // OPTIMIZATION: Fetch all payments in one query instead of N+1 queries
+    const workOrderIdsNeedingStatus = filteredWorkOrders
+      .filter((order: any) => !order.work_order_status)
+      .map((order: any) => order.id);
 
-        // Calculate status from payments
-        const { data: payments } = await supabase
-          .from('payments_data')
-          .select('first_payment, second_payment, final_payment, additional_payment')
-          .eq('work_order_id', order.id);
+    const paymentsByWorkOrder: Record<string, any[]> = {};
+    
+    if (workOrderIdsNeedingStatus.length > 0) {
+      // Fetch all payments for work orders with NULL status in one query
+      const { data: allPayments } = await supabase
+        .from('payments_data')
+        .select('work_order_id, first_payment, second_payment, final_payment, additional_payment')
+        .in('work_order_id', workOrderIdsNeedingStatus);
 
-        let totalPaid = 0;
-        if (payments) {
-          payments.forEach((p: any) => {
-            totalPaid += parseFloat(p.first_payment || 0);
-            totalPaid += parseFloat(p.second_payment || 0);
-            totalPaid += parseFloat(p.final_payment || 0);
-            totalPaid += parseFloat(p.additional_payment || 0);
-          });
-        }
+      if (allPayments) {
+        // Group payments by work_order_id
+        allPayments.forEach((payment: any) => {
+          if (!paymentsByWorkOrder[payment.work_order_id]) {
+            paymentsByWorkOrder[payment.work_order_id] = [];
+          }
+          paymentsByWorkOrder[payment.work_order_id].push(payment);
+        });
+      }
+    }
 
-        const orderAmount = parseFloat(order.order_amount?.toString() || '0');
-        const status = orderAmount > 0 && totalPaid >= orderAmount * 0.65
-          ? 'To Be Dispatched'
-          : 'Pending';
+    // Calculate status for each work order (now using pre-fetched data)
+    const workOrdersWithStatus = filteredWorkOrders.map((order: any) => {
+      if (order.work_order_status) {
+        return { ...order, status: order.work_order_status };
+      }
 
-        return { ...order, status };
-      })
-    );
+      // Calculate status from pre-fetched payments
+      const payments = paymentsByWorkOrder[order.id] || [];
+      let totalPaid = 0;
+      
+      payments.forEach((p: any) => {
+        totalPaid += parseFloat(p.first_payment || 0);
+        totalPaid += parseFloat(p.second_payment || 0);
+        totalPaid += parseFloat(p.final_payment || 0);
+        totalPaid += parseFloat(p.additional_payment || 0);
+      });
+
+      const orderAmount = parseFloat(order.order_amount?.toString() || '0');
+      const status = orderAmount > 0 && totalPaid >= orderAmount * 0.65
+        ? 'To Be Dispatched'
+        : 'Pending';
+
+      return { ...order, status };
+    });
 
     // Work Orders Stats
     const totalWorkOrders = workOrdersWithStatus.length;

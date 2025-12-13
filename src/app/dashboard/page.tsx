@@ -2,7 +2,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, Suspense } from 'react';
 import DashboardLayout from '@/components/layouts/DashboardLayout';
 import { LoadingSpinner } from '@/components/ui';
 import StatCard from '@/components/dashboard/StatCard';
@@ -85,7 +85,7 @@ const PIE_COLORS = [
 
 const SOLID_COLORS = ['#0BC28E', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
 
-export default function DashboardPage() {
+function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -522,5 +522,17 @@ export default function DashboardPage() {
 
       </div>
     </DashboardLayout>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center">
+        <LoadingSpinner size="lg" text="Loading dashboard..." />
+      </div>
+    }>
+      <DashboardContent />
+    </Suspense>
   );
 }

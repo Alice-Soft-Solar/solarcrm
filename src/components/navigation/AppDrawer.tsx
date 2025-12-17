@@ -29,13 +29,24 @@ export default function AppDrawer({ roleName, menuItems, isOpen, onToggle }: App
 
   return (
     <>
+      {/* Backdrop overlay for mobile */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={onToggle}
+          aria-hidden="true"
+        />
+      )}
+      
       {/* Sidebar - Slides from left */}
       <div
         className={`
-          fixed left-0 top-0 z-50 h-full w-72 bg-gradient-to-b from-white via-white to-zinc-50
+          fixed left-0 top-0 z-50 h-full 
+          w-72 sm:w-72 max-w-[85vw] bg-gradient-to-b from-white via-white to-zinc-50
           border-r border-border shadow-2xl
           transform transition-transform duration-300 ease-in-out
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+          lg:z-40
         `}
       >
         <div className="flex h-full flex-col">

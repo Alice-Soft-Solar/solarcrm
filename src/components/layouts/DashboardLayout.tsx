@@ -1,10 +1,11 @@
 'use client';
 
 import { createClient } from '@supabase/supabase-js';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState, useMemo, ReactNode } from 'react';
 import { Button, LoadingSpinner } from '../ui';
 import AppDrawer from '../navigation/AppDrawer';
+import { isSalesRole, isAdminRole, isSalesLeadRole, ROLES } from '@/constants/roles';
 
 interface Profile {
   id: string;
@@ -30,10 +31,14 @@ export default function DashboardLayout({
   requiredRole,
 }: DashboardLayoutProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Check if we're on a leads page (new or view)
+  const isLeadsPage = pathname?.includes('/dashboard/leads');
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -130,23 +135,59 @@ export default function DashboardLayout({
 
   // Menu items for app drawer
   const menuItems = [
-    {
-      title: 'View All Work Orders',
-      href: '/dashboard/work-orders/list',
-      icon: (
-        <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-      ),
-    },
-    ...(roleName !== 'Inventory'
+    // Work Orders - Excluded for Sales Lead and Inventory roles
+    // Sales Lead should ONLY see Lead sections, not Work Orders
+    ...(roleName !== ROLES.INVENTORY && roleName !== ROLES.SALES_LEAD
       ? [
+          {
+            title: 'View All Work Orders',
+            href: '/dashboard/work-orders/list',
+            icon: (
+              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            ),
+          },
           {
             title: 'Create Work Order',
             href: '/dashboard/work-orders',
             icon: (
               <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            ),
+          },
+        ]
+      : []),
+    // Lead management - Available to Sales, Sales Lead, Admin, Super Admin
+    // Sales Lead ONLY sees these two items (Create Lead and View Leads)
+    ...((isSalesRole(roleName) || isSalesLeadRole(roleName) || isAdminRole(roleName))
+      ? [
+          {
+            title: 'Create Lead',
+            href: '/dashboard/leads/new',
+            icon: (
+              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 4v16m8-8H4"
+                />
+              </svg>
+            ),
+          },
+          {
+            title: 'View Leads',
+            href: '/dashboard/leads',
+            icon: (
+              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
               </svg>
             ),
           },
@@ -178,43 +219,62 @@ export default function DashboardLayout({
         onToggle={() => setSidebarOpen(!sidebarOpen)}
       />
 
-      {/* Main Content Area - Shifts when sidebar opens */}
+      {/* Main Content Area - Shifts when sidebar opens on desktop only */}
       <div
         className={`
           transition-all duration-300 ease-in-out
-          ${sidebarOpen ? 'ml-72' : 'ml-0'}
+          lg:${sidebarOpen ? 'ml-72' : 'ml-0'}
         `}
       >
-        <nav className="border-b border-border bg-white shadow-sm sticky top-0 z-40">
+        <nav className={`border-b border-border bg-white shadow-sm sticky top-0 z-40`}>
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="flex h-16 items-center justify-between">
               <div className="flex items-center gap-4">
-                {/* Burger Menu Button in Header */}
-                <button
-                  onClick={() => setSidebarOpen(!sidebarOpen)}
-                  className="flex h-10 w-10 items-center justify-center rounded-lg text-foreground hover:bg-foreground/5 transition-colors duration-200"
-                  aria-label="Toggle menu"
-                >
-                  <div className="flex flex-col gap-1.5">
-                    <span
-                      className={`h-0.5 w-5 bg-foreground transition-all duration-300 ${
-                        sidebarOpen ? 'rotate-45 translate-y-1.5' : ''
-                      }`}
-                    />
-                    <span
-                      className={`h-0.5 w-5 bg-foreground transition-all duration-300 ${
-                        sidebarOpen ? 'opacity-0' : ''
-                      }`}
-                    />
-                    <span
-                      className={`h-0.5 w-5 bg-foreground transition-all duration-300 ${
-                        sidebarOpen ? '-rotate-45 -translate-y-1.5' : ''
-                      }`}
-                    />
-                  </div>
-                </button>
+                {/* Back Button for Leads Pages, Burger Menu for other pages */}
+                {isLeadsPage ? (
+                  <button
+                    onClick={() => router.push('/dashboard')}
+                    className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-white text-foreground hover:bg-accent hover:text-white hover:border-accent shadow-sm hover:shadow-md transition-all duration-200 relative z-50 focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2"
+                    aria-label="Go back to dashboard"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-6 w-6"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setSidebarOpen(!sidebarOpen)}
+                    className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-white text-foreground hover:bg-accent hover:text-white hover:border-accent shadow-sm hover:shadow-md transition-all duration-200 relative z-50 focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2"
+                    aria-label="Toggle menu"
+                  >
+                    <div className="flex flex-col gap-1.5">
+                      <span
+                        className={`h-0.5 w-5 bg-current transition-all duration-300 ${
+                          sidebarOpen ? 'rotate-45 translate-y-1.5' : ''
+                        }`}
+                      />
+                      <span
+                        className={`h-0.5 w-5 bg-current transition-all duration-300 ${
+                          sidebarOpen ? 'opacity-0' : ''
+                        }`}
+                      />
+                      <span
+                        className={`h-0.5 w-5 bg-current transition-all duration-300 ${
+                          sidebarOpen ? '-rotate-45 -translate-y-1.5' : ''
+                        }`}
+                      />
+                    </div>
+                  </button>
+                )}
                 
-                <h1 className="text-xl font-bold text-foreground">
+                <h1 className={`text-xl font-bold text-foreground ${sidebarOpen ? 'hidden lg:block' : 'block'}`}>
                   Solar CRM
                 </h1>
               </div>

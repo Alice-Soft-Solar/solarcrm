@@ -48,6 +48,12 @@ interface DashboardStats {
     week: number;
     month: number;
   };
+  leads: {
+    total: number;
+    interested: number;
+    notInterested: number;
+    followUpRequired: number;
+  };
   payments: {
     todayReceived: number;
     monthlyReceived: number;
@@ -197,6 +203,10 @@ function DashboardContent() {
     : '';
 
   const isAdmin = roleName === 'Admin' || roleName === 'Super Admin';
+  const isSalesLead = roleName === 'salesLead';
+  const isSales = roleName === 'Sales';
+  // Show leads section for Sales, Sales Lead, Admin, and Super Admin
+  const showLeadsSection = isSales || isSalesLead || isAdmin;
 
   // Prepare chart data
   const statusChartData = stats?.charts.statusDistribution
@@ -239,10 +249,64 @@ function DashboardContent() {
           </div>
         </div>
 
+        {/* KPI Cards - Leads */}
+        {showLeadsSection && (
+          <div>
+            <h2 className="text-xl font-semibold text-foreground mb-4">Leads Overview</h2>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <StatCard
+                title="Total Leads"
+                value={stats?.leads.total || 0}
+                subtitle="All leads"
+                icon={
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                }
+                color="blue"
+              />
+              <StatCard
+                title="Interested"
+                value={stats?.leads.interested || 0}
+                subtitle="Potential customers"
+                icon={
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                }
+                color="green"
+              />
+              <StatCard
+                title="Not Interested"
+                value={stats?.leads.notInterested || 0}
+                subtitle="Closed leads"
+                icon={
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                }
+                color="red"
+              />
+              <StatCard
+                title="Follow Up Required"
+                value={stats?.leads.followUpRequired || 0}
+                subtitle="Needs attention"
+                icon={
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                }
+                color="orange"
+              />
+            </div>
+          </div>
+        )}
+
         {/* KPI Cards - Work Orders */}
         <div>
           <h2 className="text-xl font-semibold text-foreground mb-4">Work Orders Overview</h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+
             <StatCard
               title="Total Work Orders"
               value={stats?.workOrders.total || 0}

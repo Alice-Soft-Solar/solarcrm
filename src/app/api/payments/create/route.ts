@@ -224,7 +224,7 @@ export async function POST(request: NextRequest) {
 
     // If status changed to "To Be Dispatched", send WhatsApp notifications
     if (shouldBeDispatched && currentWorkOrder?.work_order_status === 'To Be Dispatched') {
-      // Send notifications asynchronously (non-blocking)
+      // Send notifications asynchronously205ms205ms205ms (non-blocking)
       (async () => {
         try {
           // Re-fetch full work order details
@@ -274,10 +274,15 @@ export async function POST(request: NextRequest) {
             await sendWhatsAppToUsers(adminUsers, adminMessage).catch(err => console.error('Admin WhatsApp error:', err));
           }
 
-          // Send to sales executive (separate message)
+          // Send to sales executive (only if not already in admin users list to avoid duplicates)
           if (salesExecutive && salesExecutive.phone) {
-            const salesMessage = getAdminSalesToBeDispatchedMessage(workOrderData);
-            await sendWhatsAppToUser(salesExecutive, salesMessage).catch(err => console.error('Sales Executive WhatsApp error:', err));
+            const isSalesExecAlsoAdmin = adminUsers.some(admin => admin.id === salesExecutive.id);
+            if (!isSalesExecAlsoAdmin) {
+              const salesMessage = getAdminSalesToBeDispatchedMessage(workOrderData);
+              await sendWhatsAppToUser(salesExecutive, salesMessage).catch(err => console.error('Sales Executive WhatsApp error:', err));
+            } else {
+              console.log('ℹ️ Sales Executive is also an Admin, already notified via admin group');
+            }
           }
 
           // Send to inventory users (detailed dispatch info)

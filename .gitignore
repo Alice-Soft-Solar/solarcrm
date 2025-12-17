@@ -126,6 +126,6 @@ next-env.d.ts
 *.tar.gz
 *.rar
 
-# Optional: Uncomment if you want to ignore these
-# *.md (except README.md)
-# !README.md
+# Markdown documentation files (exclude from git)
+*.md
+!README.md

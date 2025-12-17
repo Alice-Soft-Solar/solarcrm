@@ -162,14 +162,19 @@ export async function POST(request: NextRequest) {
         console.log(`✅ Admin "Dispatched" WhatsApp sent: ${successCount}/${adminUsers.length}`);
       }
 
-      // Send to sales executive
+      // Send to sales executive (only if not already in admin users list to avoid duplicates)
       if (salesExecutive && salesExecutive.phone) {
-        const salesMessage = getAdminSalesDispatchedMessage(workOrderData);
-        const salesResult = await sendWhatsAppToUser(salesExecutive, salesMessage);
-        if (salesResult.success) {
-          console.log('✅ Sales Executive "Dispatched" WhatsApp sent');
+        const isSalesExecAlsoAdmin = adminUsers.some(admin => admin.id === salesExecutive.id);
+        if (!isSalesExecAlsoAdmin) {
+          const salesMessage = getAdminSalesDispatchedMessage(workOrderData);
+          const salesResult = await sendWhatsAppToUser(salesExecutive, salesMessage);
+          if (salesResult.success) {
+            console.log('✅ Sales Executive "Dispatched" WhatsApp sent');
+          } else {
+            console.warn('⚠️ Sales Executive WhatsApp failed:', salesResult.error);
+          }
         } else {
-          console.warn('⚠️ Sales Executive WhatsApp failed:', salesResult.error);
+          console.log('ℹ️ Sales Executive is also an Admin, already notified via admin group');
         }
       }
     } catch (whatsappError) {

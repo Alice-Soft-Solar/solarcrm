@@ -86,14 +86,14 @@ export default function LoginPage() {
               </label>
               <div className="relative">
                 <input
-                  id="password"
-                  name="password"
+              id="password"
+              name="password"
                   type={showPassword ? 'text' : 'password'}
-                  autoComplete="current-password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter your password"
                   className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 pr-10 text-foreground placeholder-zinc-400 shadow-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-0"
                 />
                 <button

@@ -47,26 +47,26 @@ export async function DELETE(request: NextRequest) {
     });
 
     // Verify work order exists and belongs to the user's company (if companyId provided)
-    const { data: workOrder, error: fetchError } = await supabase
-      .from('work_orders')
-      .select('id, company_id')
-      .eq('id', work_order_id)
-      .single();
+      const { data: workOrder, error: fetchError } = await supabase
+        .from('work_orders')
+        .select('id, company_id')
+        .eq('id', work_order_id)
+        .single();
 
-    if (fetchError || !workOrder) {
-      return NextResponse.json(
-        { error: 'Work order not found' },
-        { status: 404 }
-      );
-    }
+      if (fetchError || !workOrder) {
+        return NextResponse.json(
+          { error: 'Work order not found' },
+          { status: 404 }
+        );
+      }
 
     // Verify work order belongs to the user's company (if companyId provided)
     if (companyId && workOrder.company_id !== companyId) {
-      return NextResponse.json(
-        { error: 'You do not have permission to delete this work order' },
-        { status: 403 }
-      );
-    }
+        return NextResponse.json(
+          { error: 'You do not have permission to delete this work order' },
+          { status: 403 }
+        );
+      }
 
     // Step 1: Delete all associated payments first (cascade delete)
     // This is required because of the foreign key constraint: payments_data_work_order_id_fkey

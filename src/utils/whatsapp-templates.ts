@@ -37,8 +37,7 @@ Your Work Order Number: ${data.work_order_number} has successfully registered.
 Total Work Order Amount: ${formatCurrency(data.order_amount)}
 Payment Received: ${formatCurrency(paymentReceived)}
 Plant Capacity: ${plantCapacity}
-Note: Set up will finished with in 15 days of receiving total Work Order Amount.Setup will be finished within 15 days from the date of receipt of total work order amount.
-
+Note: Set up will finished with in 15 days of receiving total Work Order Amount.
 For all your queries contact: ${executiveContact} / ${escalationContact}`;
 }
 

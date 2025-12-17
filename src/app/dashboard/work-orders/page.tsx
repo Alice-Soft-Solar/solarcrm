@@ -142,6 +142,9 @@ export default function WorkOrdersPage() {
           setProfile(profileData);
           setAuthorized(true);
           console.log('✅ Authorization complete');
+          
+          // Auto-generate work order number when profile is loaded
+          generateNextWorkOrderNumber(profileData.company_id);
         }
       } catch (error: unknown) {
         console.error('❌ Unexpected error in fetchUser:', error);
@@ -163,6 +166,45 @@ export default function WorkOrdersPage() {
       isMounted = false;
     };
   }, [router]);
+
+  /**
+   * Generate next work order number from API
+   */
+  const generateNextWorkOrderNumber = async (companyId: string) => {
+    try {
+      const response = await fetch('/api/work-orders/next-number', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ company_id: companyId }),
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.work_order_number) {
+        setFormData((prev) => ({
+          ...prev,
+          work_order_number: result.work_order_number,
+        }));
+        console.log('✅ Work order number generated:', result.work_order_number);
+      } else {
+        console.error('Failed to generate work order number:', result.error);
+        // Set a placeholder if generation fails
+        setFormData((prev) => ({
+          ...prev,
+          work_order_number: 'AUTO-GENERATE',
+        }));
+      }
+    } catch (error) {
+      console.error('Error generating work order number:', error);
+      // Set a placeholder if generation fails
+      setFormData((prev) => ({
+        ...prev,
+        work_order_number: 'AUTO-GENERATE',
+      }));
+    }
+  };
 
   /**
    * Uploads a document file to Supabase Storage and returns the public URL
@@ -405,11 +447,14 @@ export default function WorkOrdersPage() {
               <input
                 type="text"
                 required
+                readOnly
                 value={formData.work_order_number}
-                onChange={(e) => setFormData({ ...formData, work_order_number: e.target.value })}
-                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
-                placeholder="WO-2024-001"
+                className="mt-1 block w-full rounded-md border border-border bg-zinc-50 px-3 py-2 text-foreground cursor-not-allowed"
+                placeholder="Auto-generating..."
               />
+              <p className="mt-1 text-xs text-foreground opacity-60">
+                Format: CompanyCode + Year + Month + Serial (e.g., GMS25120001)
+              </p>
             </div>
 
             <div>

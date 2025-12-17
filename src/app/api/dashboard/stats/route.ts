@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
     });
 
     const isAdmin = roleName === 'Admin' || roleName === 'Super Admin';
+    const isSalesLead = roleName === 'salesLead';
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayISO = today.toISOString();
@@ -47,6 +48,39 @@ export async function POST(request: NextRequest) {
     
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
     startOfMonth.setHours(0, 0, 0, 0);
+
+    // Fetch leads statistics with role-based filtering
+    let leadsQuery = supabase
+      .from('leads')
+      .select('id, status, company_id, creator_id');
+
+    // Apply role-based filtering for leads
+    if (roleName === 'Sales') {
+      // Sales can only see their own leads
+      leadsQuery = leadsQuery.eq('creator_id', userId);
+    } else if (isSalesLead || isAdmin) {
+      // Sales Lead and Admin can see all leads in their company
+      leadsQuery = leadsQuery.eq('company_id', companyId);
+    }
+
+    const { data: leads, error: leadsError } = await leadsQuery;
+
+    if (leadsError) {
+      console.error('Error fetching leads:', leadsError);
+    }
+
+    // Calculate lead statistics
+    const allLeads = leads || [];
+    const totalLeads = allLeads.length;
+    const interestedLeads = allLeads.filter((lead: any) => 
+      lead.status === 'Interested'
+    ).length;
+    const notInterestedLeads = allLeads.filter((lead: any) => 
+      lead.status === 'Not Interested'
+    ).length;
+    const followUpRequiredLeads = allLeads.filter((lead: any) => 
+      lead.status === 'Follow Up Required'
+    ).length;
 
     // Build work orders query with all necessary fields for filtering
     let workOrdersQuery = supabase
@@ -347,6 +381,12 @@ export async function POST(request: NextRequest) {
           today: todayOrders,
           week: weekOrders,
           month: monthOrders,
+        },
+        leads: {
+          total: totalLeads,
+          interested: interestedLeads,
+          notInterested: notInterestedLeads,
+          followUpRequired: followUpRequiredLeads,
         },
         payments: {
           todayReceived,

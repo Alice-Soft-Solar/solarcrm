@@ -5,6 +5,7 @@
 
 export const ROLES = {
   SALES: 'Sales',
+  SALES_LEAD: 'salesLead', // Database value is camelCase: 'salesLead'
   ADMIN: 'Admin',
   SUPER_ADMIN: 'Super Admin',
   INVENTORY: 'Inventory',
@@ -17,6 +18,7 @@ export type RoleName = typeof ROLES[keyof typeof ROLES];
  */
 export const ALLOWED_ROLES: readonly RoleName[] = [
   ROLES.SALES,
+  ROLES.SALES_LEAD,
   ROLES.ADMIN,
   ROLES.SUPER_ADMIN,
   ROLES.INVENTORY,
@@ -41,6 +43,13 @@ export function isInventoryRole(roleName: string | null | undefined): boolean {
  */
 export function isSalesRole(roleName: string | null | undefined): boolean {
   return roleName === ROLES.SALES;
+}
+
+/**
+ * Check if a role is Sales Lead
+ */
+export function isSalesLeadRole(roleName: string | null | undefined): boolean {
+  return roleName === ROLES.SALES_LEAD;
 }
 
 

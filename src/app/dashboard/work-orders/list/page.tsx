@@ -965,7 +965,12 @@ export default function WorkOrdersListPage() {
       site_details: order.site_details || '',
       structure_height: order.structure_height || '',
       roof_type: order.roof_type || '',
-      plant_capacity: order.plant_capacity || '',
+      // Extract numeric value from plant_capacity (remove "kW" if present)
+      plant_capacity: order.plant_capacity 
+        ? (order.plant_capacity.endsWith('kW') 
+            ? order.plant_capacity.replace('kW', '') 
+            : order.plant_capacity)
+        : '',
       order_amount: order.order_amount.toString(),
       aadhaar_url: order.aadhaar_url || '',
       pan_url: order.pan_url || '',
@@ -1123,6 +1128,13 @@ export default function WorkOrdersListPage() {
 
     setEditLoading(true);
     try {
+      // Format plant_capacity: if numeric, append "kW", otherwise store as-is
+      const formattedPlantCapacity = editFormData.plant_capacity 
+        ? (editFormData.plant_capacity.trim() && !isNaN(parseFloat(editFormData.plant_capacity)) 
+            ? `${editFormData.plant_capacity}kW` 
+            : editFormData.plant_capacity)
+        : null;
+
       const response = await fetch('/api/work-orders/update', {
         method: 'PUT',
         headers: {
@@ -1131,6 +1143,7 @@ export default function WorkOrdersListPage() {
         body: JSON.stringify({
           work_order_id: editingWorkOrder.id,
           ...editFormData,
+          plant_capacity: formattedPlantCapacity,
         }),
       });
 
@@ -1581,7 +1594,11 @@ export default function WorkOrdersListPage() {
                         {order.roof_type || 'N/A'}
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
-                        {order.plant_capacity || 'N/A'}
+                        {order.plant_capacity 
+                          ? (order.plant_capacity.endsWith('kW') 
+                              ? order.plant_capacity 
+                              : `${order.plant_capacity}kW`)
+                          : 'N/A'}
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-foreground">
                         {formatCurrency(order.order_amount)}
@@ -2338,10 +2355,19 @@ export default function WorkOrdersListPage() {
                       Plant Capacity
                     </label>
                     <input
-                      type="text"
+                      type="number"
+                      min="0"
+                      step="0.01"
                       value={editFormData.plant_capacity}
-                      onChange={(e) => setEditFormData({ ...editFormData, plant_capacity: e.target.value })}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        // Only allow numeric input
+                        if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                          setEditFormData({ ...editFormData, plant_capacity: value });
+                        }
+                      }}
                       className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-[#1E1E1E]"
+                      placeholder="5, 10, etc."
                     />
                   </div>
 

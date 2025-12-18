@@ -106,10 +106,10 @@ export default function NewLeadPage() {
               const execData = await execResponse.json();
               if (execData.success && execData.executives) {
                 setExecutives(execData.executives);
-              } else {
+        } else {
                 console.error('Failed to fetch executives:', execData.error);
               }
-            } else {
+          } else {
               const errorData = await execResponse.json();
               console.error('Error fetching executives:', errorData.error);
             }
@@ -205,7 +205,7 @@ export default function NewLeadPage() {
         router.push(`/dashboard/leads/success?leadId=${leadId}`);
       } else {
         // Sales role: direct redirect to view leads
-        router.push('/dashboard/leads');
+      router.push('/dashboard/leads');
       }
     } catch (err: any) {
       console.error('Unexpected error creating lead:', err);

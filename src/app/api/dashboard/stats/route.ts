@@ -54,22 +54,104 @@ export async function POST(request: NextRequest) {
       .from('leads')
       .select('id, status, company_id, creator_id');
 
-    // Apply role-based filtering for leads
-    if (roleName === 'Sales') {
-      // Sales can only see their own leads
-      leadsQuery = leadsQuery.eq('creator_id', userId);
-    } else if (isSalesLead || isAdmin) {
-      // Sales Lead and Admin can see all leads in their company
-      leadsQuery = leadsQuery.eq('company_id', companyId);
+    // For Sales Lead: Fetch separate stats for "My Leads" and "Team Leads"
+    let myLeadsStats = null;
+    let teamLeadsStats = null;
+
+    if (isSalesLead) {
+      // Fetch Sales Lead's own leads
+      const { data: myLeads, error: myLeadsError } = await supabase
+        .from('leads')
+        .select('id, status, company_id, creator_id')
+        .eq('creator_id', userId);
+
+      if (myLeadsError) {
+        console.error('Error fetching Sales Lead own leads:', myLeadsError);
+      }
+
+      // First, get the Sales role ID
+      const { data: salesRole, error: salesRoleError } = await supabase
+        .from('roles')
+        .select('id')
+        .eq('role_name', 'Sales')
+        .single();
+
+      if (salesRoleError) {
+        console.error('Error fetching Sales role:', salesRoleError);
+      }
+
+      // Fetch Sales role users in the same company
+      const { data: salesProfiles, error: salesProfilesError } = salesRole
+        ? await supabase
+            .from('profiles')
+            .select('id')
+            .eq('company_id', companyId)
+            .eq('role_id', salesRole.id)
+        : { data: [], error: null };
+
+      if (salesProfilesError) {
+        console.error('Error fetching Sales profiles:', salesProfilesError);
+      }
+
+      const salesUserIds = (salesProfiles || []).map((p: any) => p.id);
+
+      // Fetch team leads (leads created by Sales role users)
+      const { data: teamLeads, error: teamLeadsError } = salesUserIds.length > 0
+        ? await supabase
+            .from('leads')
+            .select('id, status, company_id, creator_id')
+            .eq('company_id', companyId)
+            .in('creator_id', salesUserIds)
+        : { data: [], error: null };
+
+      if (teamLeadsError) {
+        console.error('Error fetching team leads:', teamLeadsError);
+      }
+
+      // Calculate "My Leads" statistics
+      const myLeadsData = myLeads || [];
+      myLeadsStats = {
+        total: myLeadsData.length,
+        interested: myLeadsData.filter((lead: any) => lead.status === 'Interested').length,
+        notInterested: myLeadsData.filter((lead: any) => lead.status === 'Not Interested').length,
+        followUpRequired: myLeadsData.filter((lead: any) => lead.status === 'Follow Up Required').length,
+      };
+
+      // Calculate "Team Leads" statistics
+      const teamLeadsData = teamLeads || [];
+      teamLeadsStats = {
+        total: teamLeadsData.length,
+        interested: teamLeadsData.filter((lead: any) => lead.status === 'Interested').length,
+        notInterested: teamLeadsData.filter((lead: any) => lead.status === 'Not Interested').length,
+        followUpRequired: teamLeadsData.filter((lead: any) => lead.status === 'Follow Up Required').length,
+      };
+
     }
 
-    const { data: leads, error: leadsError } = await leadsQuery;
+    // Handle leads query result (only for non-Sales Lead roles)
+    let leads: any[] = [];
+    let leadsError: any = null;
+    
+    if (!isSalesLead) {
+      // Apply role-based filtering for leads (Sales, Admin, Super Admin)
+      if (roleName === 'Sales') {
+        // Sales can only see their own leads
+        leadsQuery = leadsQuery.eq('creator_id', userId);
+      } else if (isAdmin) {
+        // Admin can see all leads in their company
+        leadsQuery = leadsQuery.eq('company_id', companyId);
+      }
+
+      const { data: leadsData, error: leadsErrorData } = await leadsQuery;
+      leads = leadsData || [];
+      leadsError = leadsErrorData;
+    }
 
     if (leadsError) {
       console.error('Error fetching leads:', leadsError);
     }
 
-    // Calculate lead statistics
+    // Calculate lead statistics (for non-Sales Lead roles)
     const allLeads = leads || [];
     const totalLeads = allLeads.length;
     const interestedLeads = allLeads.filter((lead: any) => 
@@ -388,6 +470,11 @@ export async function POST(request: NextRequest) {
           notInterested: notInterestedLeads,
           followUpRequired: followUpRequiredLeads,
         },
+        // Sales Lead specific: separate stats for "My Leads" and "Team Leads"
+        ...(isSalesLead && myLeadsStats && teamLeadsStats ? {
+          myLeads: myLeadsStats,
+          teamLeads: teamLeadsStats,
+        } : {}),
         payments: {
           todayReceived,
           monthlyReceived,

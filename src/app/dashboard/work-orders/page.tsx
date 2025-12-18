@@ -44,6 +44,9 @@ export default function WorkOrdersPage() {
     cancelled_check_url: '',
   });
 
+  // Validation state for form fields
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
   // Upload state for each document
   const [uploadStates, setUploadStates] = useState({
     aadhaar: { loading: false, error: '' },
@@ -347,8 +350,38 @@ export default function WorkOrdersPage() {
     }
   };
 
+  // Validate form fields
+  const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {};
+
+    if (!formData.work_order_number.trim()) {
+      newErrors.work_order_number = 'Work order number did not fill';
+    }
+    if (!formData.customer_name.trim()) {
+      newErrors.customer_name = 'Customer name did not fill';
+    }
+    if (!formData.customer_address.trim()) {
+      newErrors.customer_address = 'Customer address did not fill';
+    }
+    if (!formData.customer_phone.trim()) {
+      newErrors.customer_phone = 'Customer phone number did not fill';
+    }
+    if (!formData.order_amount.trim()) {
+      newErrors.order_amount = 'Order amount did not fill';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate form before submission
+    if (!validateForm()) {
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -388,7 +421,12 @@ export default function WorkOrdersPage() {
           site_details: formData.site_details || null,
           structure_height: formData.structure_height || null,
           roof_type: formData.roof_type || null,
-          plant_capacity: formData.plant_capacity || null,
+          // Format plant capacity: if numeric, append "kW", otherwise store as-is
+          plant_capacity: formData.plant_capacity 
+            ? (formData.plant_capacity.trim() && !isNaN(parseFloat(formData.plant_capacity)) 
+                ? `${formData.plant_capacity}kW` 
+                : formData.plant_capacity)
+            : null,
           order_amount: orderAmount,
           aadhaar_url: formData.aadhaar_url || null,
           pan_url: formData.pan_url || null,
@@ -449,9 +487,16 @@ export default function WorkOrdersPage() {
                 required
                 readOnly
                 value={formData.work_order_number}
-                className="mt-1 block w-full rounded-md border border-border bg-zinc-50 px-3 py-2 text-foreground cursor-not-allowed"
+                className={`mt-1 block w-full rounded-md border px-3 py-2 text-foreground cursor-not-allowed ${
+                  errors.work_order_number 
+                    ? 'border-red-500 bg-red-50' 
+                    : 'border-border bg-zinc-50'
+                }`}
                 placeholder="Auto-generating..."
               />
+              {errors.work_order_number && (
+                <p className="mt-1 text-xs text-red-600">{errors.work_order_number}</p>
+              )}
               <p className="mt-1 text-xs text-foreground opacity-60">
                 Format: CompanyCode + Year + Month + Serial (e.g., GMS25120001)
               </p>
@@ -465,10 +510,23 @@ export default function WorkOrdersPage() {
                 type="text"
                 required
                 value={formData.customer_name}
-                onChange={(e) => setFormData({ ...formData, customer_name: e.target.value })}
-                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
+                onChange={(e) => {
+                  setFormData({ ...formData, customer_name: e.target.value });
+                  // Clear error when user starts typing
+                  if (errors.customer_name) {
+                    setErrors({ ...errors, customer_name: '' });
+                  }
+                }}
+                className={`mt-1 block w-full rounded-md border px-3 py-2 text-foreground placeholder-zinc-400 focus:outline-none focus:ring-2 transition-all duration-200 ${
+                  errors.customer_name 
+                    ? 'border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500' 
+                    : 'border-border bg-white focus:border-accent focus:ring-accent'
+                }`}
                 placeholder="John Doe"
               />
+              {errors.customer_name && (
+                <p className="mt-1 text-xs text-red-600">{errors.customer_name}</p>
+              )}
             </div>
 
             <div>
@@ -478,11 +536,24 @@ export default function WorkOrdersPage() {
               <textarea
                 required
                 value={formData.customer_address}
-                onChange={(e) => setFormData({ ...formData, customer_address: e.target.value })}
+                onChange={(e) => {
+                  setFormData({ ...formData, customer_address: e.target.value });
+                  // Clear error when user starts typing
+                  if (errors.customer_address) {
+                    setErrors({ ...errors, customer_address: '' });
+                  }
+                }}
                 rows={3}
-                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
+                className={`mt-1 block w-full rounded-md border px-3 py-2 text-foreground placeholder-zinc-400 focus:outline-none focus:ring-2 transition-all duration-200 ${
+                  errors.customer_address 
+                    ? 'border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500' 
+                    : 'border-border bg-white focus:border-accent focus:ring-accent'
+                }`}
                 placeholder="123 Main St, City, State"
               />
+              {errors.customer_address && (
+                <p className="mt-1 text-xs text-red-600">{errors.customer_address}</p>
+              )}
             </div>
 
             <div>
@@ -493,10 +564,23 @@ export default function WorkOrdersPage() {
                 type="tel"
                 required
                 value={formData.customer_phone}
-                onChange={(e) => setFormData({ ...formData, customer_phone: e.target.value })}
-                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
+                onChange={(e) => {
+                  setFormData({ ...formData, customer_phone: e.target.value });
+                  // Clear error when user starts typing
+                  if (errors.customer_phone) {
+                    setErrors({ ...errors, customer_phone: '' });
+                  }
+                }}
+                className={`mt-1 block w-full rounded-md border px-3 py-2 text-foreground placeholder-zinc-400 focus:outline-none focus:ring-2 transition-all duration-200 ${
+                  errors.customer_phone 
+                    ? 'border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500' 
+                    : 'border-border bg-white focus:border-accent focus:ring-accent'
+                }`}
                 placeholder="+1 234 567 8900"
               />
+              {errors.customer_phone && (
+                <p className="mt-1 text-xs text-red-600">{errors.customer_phone}</p>
+              )}
             </div>
 
             <div>
@@ -530,11 +614,19 @@ export default function WorkOrdersPage() {
                 Plant Capacity
               </label>
               <input
-                type="text"
+                type="number"
+                min="0"
+                step="0.01"
                 value={formData.plant_capacity}
-                onChange={(e) => setFormData({ ...formData, plant_capacity: e.target.value })}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  // Only allow numeric input
+                  if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                    setFormData({ ...formData, plant_capacity: value });
+                  }
+                }}
                 className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
-                placeholder="5kW, 10kW, etc."
+                placeholder="5, 10, etc."
               />
             </div>
 
@@ -547,10 +639,23 @@ export default function WorkOrdersPage() {
                 step="0.01"
                 required
                 value={formData.order_amount}
-                onChange={(e) => setFormData({ ...formData, order_amount: e.target.value })}
-                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
+                onChange={(e) => {
+                  setFormData({ ...formData, order_amount: e.target.value });
+                  // Clear error when user starts typing
+                  if (errors.order_amount) {
+                    setErrors({ ...errors, order_amount: '' });
+                  }
+                }}
+                className={`mt-1 block w-full rounded-md border px-3 py-2 text-foreground placeholder-zinc-400 focus:outline-none focus:ring-2 transition-all duration-200 ${
+                  errors.order_amount 
+                    ? 'border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500' 
+                    : 'border-border bg-white focus:border-accent focus:ring-accent'
+                }`}
                 placeholder="10000.00"
               />
+              {errors.order_amount && (
+                <p className="mt-1 text-xs text-red-600">{errors.order_amount}</p>
+              )}
             </div>
 
             <div className="md:col-span-2">

@@ -72,6 +72,18 @@ export async function POST(request: NextRequest) {
           id: p.id,
           full_name: p.full_name || 'Unnamed',
         }));
+    } else if (roleName === 'Sales') {
+      // Sales: Show only Sales Lead accounts
+      executives = (profiles || [])
+        .filter((p: any) => {
+          const r = p.roles as { role_name: string } | { role_name: string }[];
+          const rn = Array.isArray(r) ? r[0]?.role_name : r?.role_name;
+          return rn === 'salesLead';
+        })
+        .map((p: any) => ({
+          id: p.id,
+          full_name: p.full_name || 'Unnamed',
+        }));
     } else if (roleName === 'salesLead') {
       // Sales Lead: Show only Sales executives (not other Sales Leads) + themselves
       const salesExecs = (profiles || [])

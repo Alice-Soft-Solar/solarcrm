@@ -234,7 +234,7 @@ export default function DashboardLayout({
                 {isLeadsPage ? (
                   <button
                     onClick={() => router.push('/dashboard')}
-                    className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-white text-foreground hover:bg-accent hover:text-white hover:border-accent shadow-sm hover:shadow-md transition-all duration-200 relative z-50 focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2"
+                    className="flex h-10 w-10 items-center justify-center text-foreground hover:text-accent transition-colors duration-200 relative z-50 focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2"
                     aria-label="Go back to dashboard"
                   >
                     <svg

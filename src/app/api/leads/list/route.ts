@@ -21,7 +21,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { userId, companyId, roleName, page = 1, limit = 50, search = '' } = body;
+    const { 
+      userId, 
+      companyId, 
+      roleName, 
+      page = 1, 
+      limit = 50, 
+      search = '',
+      filters = {}
+    } = body;
+    
+    const {
+      executiveId = '',
+      status = '',
+      visitStatus = '',
+      singleDate = '',
+      dateFrom = '',
+      dateTo = '',
+    } = filters;
 
     if (!userId) {
       return NextResponse.json(
@@ -107,20 +124,64 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Apply search filter if provided
-    if (search && search.trim()) {
-      const searchTerm = `%${search.trim()}%`;
-      // Try both field name variations for compatibility
-      query = query.or(`customer_name.ilike.${searchTerm},customer_phone.ilike.${searchTerm},customer_address.ilike.${searchTerm},mobile_number.ilike.${searchTerm},address.ilike.${searchTerm}`);
+    // Search filtering removed - now handled client-side for partial phone matching
+    // This allows searching individual digits (e.g., "8" finds all phones containing "8")
+
+    // Apply filters with AND logic
+    // Executive filter
+    if (executiveId && executiveId.trim()) {
+      query = query.eq('creator_id', executiveId.trim());
     }
 
-    // Add pagination
-    const pageSize = Math.min(Math.max(parseInt(limit) || 50, 1), 100); // Limit between 1-100
-    const pageNumber = Math.max(parseInt(page) || 1, 1);
-    const from = (pageNumber - 1) * pageSize;
-    const to = from + pageSize - 1;
+    // Status filter
+    if (status && status.trim()) {
+      query = query.eq('status', status.trim());
+    }
+
+    // Visit Status filter
+    if (visitStatus && visitStatus.trim()) {
+      query = query.eq('visit_status', visitStatus.trim());
+    }
+
+    // Date filters - handle single date OR date range OR month/day/year
+    if (singleDate && singleDate.trim()) {
+      // Single date: filter by exact date
+      const date = new Date(singleDate.trim());
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+      query = query.gte('created_at', startOfDay.toISOString())
+                   .lte('created_at', endOfDay.toISOString());
+    } else if (dateFrom && dateTo && dateFrom.trim() && dateTo.trim()) {
+      // Date range: filter between from and to dates
+      const fromDate = new Date(dateFrom.trim());
+      fromDate.setHours(0, 0, 0, 0);
+      const toDate = new Date(dateTo.trim());
+      toDate.setHours(23, 59, 59, 999);
+      query = query.gte('created_at', fromDate.toISOString())
+                   .lte('created_at', toDate.toISOString());
+    }
+
+    // Handle pagination - if limit is very large (10000+), fetch all without pagination
+    // Otherwise apply pagination for backward compatibility
+    const requestedLimit = parseInt(limit) || 50;
+    let pageSize: number;
+    let pageNumber: number;
     
-    query = query.range(from, to);
+    if (requestedLimit >= 10000) {
+      // Fetch all leads (no pagination) for client-side filtering
+      // Don't apply .range() to get all results
+      pageSize = requestedLimit; // Use the large limit
+      pageNumber = 1;
+    } else {
+      // Apply pagination for smaller requests
+      pageSize = Math.min(Math.max(requestedLimit, 1), 100); // Limit between 1-100
+      pageNumber = Math.max(parseInt(page) || 1, 1);
+      const from = (pageNumber - 1) * pageSize;
+      const to = from + pageSize - 1;
+      query = query.range(from, to);
+    }
 
     const { data, error } = await query;
 
@@ -132,22 +193,53 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get total count for pagination (without pagination limit)
+    // Get total count for pagination
+    // If fetching all leads (limit >= 10000), count is the actual fetched count
+    // Otherwise, get total count for pagination
     let countQuery = supabase
       .from('leads')
       .select('id', { count: 'exact', head: true });
 
+    // Apply same filters to count query
     if (roleName === 'Sales') {
       countQuery = countQuery.eq('creator_id', userId);
+    } else if (roleName === 'salesLead') {
+      if (companyId) {
+        countQuery = countQuery.eq('company_id', companyId);
+      }
     } else if (roleName === 'Admin' || roleName === 'Super Admin') {
       if (companyId) {
         countQuery = countQuery.eq('company_id', companyId);
       }
     }
 
-    if (search && search.trim()) {
-      const searchTerm = `%${search.trim()}%`;
-      countQuery = countQuery.or(`customer_name.ilike.${searchTerm},customer_phone.ilike.${searchTerm},customer_address.ilike.${searchTerm},mobile_number.ilike.${searchTerm},address.ilike.${searchTerm}`);
+    // Search filtering removed - now handled client-side for partial phone matching
+
+    // Apply same filters to count query
+    if (executiveId && executiveId.trim()) {
+      countQuery = countQuery.eq('creator_id', executiveId.trim());
+    }
+    if (status && status.trim()) {
+      countQuery = countQuery.eq('status', status.trim());
+    }
+    if (visitStatus && visitStatus.trim()) {
+      countQuery = countQuery.eq('visit_status', visitStatus.trim());
+    }
+    if (singleDate && singleDate.trim()) {
+      const date = new Date(singleDate.trim());
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+      countQuery = countQuery.gte('created_at', startOfDay.toISOString())
+                             .lte('created_at', endOfDay.toISOString());
+    } else if (dateFrom && dateTo && dateFrom.trim() && dateTo.trim()) {
+      const fromDate = new Date(dateFrom.trim());
+      fromDate.setHours(0, 0, 0, 0);
+      const toDate = new Date(dateTo.trim());
+      toDate.setHours(23, 59, 59, 999);
+      countQuery = countQuery.gte('created_at', fromDate.toISOString())
+                             .lte('created_at', toDate.toISOString());
     }
 
     const { count, error: countError } = await countQuery;
@@ -206,13 +298,16 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Calculate pagination response
+    const actualCount = requestedLimit >= 10000 ? mappedLeads.length : (count || 0);
+
     return NextResponse.json({
       leads: mappedLeads,
       pagination: {
         page: pageNumber,
         limit: pageSize,
-        total: count || 0,
-        totalPages: Math.ceil((count || 0) / pageSize),
+        total: actualCount,
+        totalPages: requestedLimit >= 10000 ? 1 : Math.ceil(actualCount / pageSize),
       },
     });
   } catch (error: unknown) {

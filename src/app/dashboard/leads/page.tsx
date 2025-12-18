@@ -40,11 +40,19 @@ interface Profile {
 export default function ViewLeadsPage() {
   const router = useRouter();
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [allLeads, setAllLeads] = useState<Lead[]>([]); // Store all leads for client-side filtering
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDateRange, setSelectedDateRange] = useState<string>('');
   const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
+  // Filter states
+  const [filterExecutive, setFilterExecutive] = useState<string>('');
+  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [filterVisitStatus, setFilterVisitStatus] = useState<string>('');
+  const [filterSingleDate, setFilterSingleDate] = useState<string>('');
+  const [filterDateFrom, setFilterDateFrom] = useState<string>('');
+  const [filterDateTo, setFilterDateTo] = useState<string>('');
+  const [executiveOptions, setExecutiveOptions] = useState<Array<{ id: string; full_name: string }>>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -125,11 +133,88 @@ export default function ViewLeadsPage() {
     init();
   }, [router, supabase]);
 
+  // Fetch executives for filter (Admin, Super Admin, and Sales Lead only)
+  useEffect(() => {
+    const fetchExecutives = async () => {
+      if (!profile || (roleName !== 'Admin' && roleName !== 'Super Admin' && roleName !== 'salesLead')) {
+        return;
+      }
+
+      try {
+        const execResponse = await fetch('/api/leads/executives', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            companyId: profile.company_id,
+            roleName: roleName,
+            currentUserId: profile.id,
+            currentUserFullName: profile.full_name,
+          }),
+        });
+
+        if (execResponse.ok) {
+          const execData = await execResponse.json();
+          if (execData.success && execData.executives) {
+            setExecutiveOptions(execData.executives);
+          }
+        } else {
+          console.error('Error fetching executives:', await execResponse.json());
+        }
+      } catch (error) {
+        console.error('Error fetching executives:', error);
+      }
+    };
+
+    fetchExecutives();
+  }, [profile, roleName]);
+
   useEffect(() => {
     if (!profile) return;
 
     fetchLeads();
-  }, [profile, searchQuery, selectedDateRange, pagination.page]);
+  }, [profile, filterExecutive, filterStatus, filterVisitStatus, filterSingleDate, filterDateFrom, filterDateTo]);
+
+  // Client-side filtering for search query (like work orders)
+  useEffect(() => {
+    if (!allLeads.length) {
+      setLeads([]);
+      setPagination(prev => ({ ...prev, total: 0, totalPages: 0 }));
+      return;
+    }
+
+    let filtered = [...allLeads];
+
+    // Apply search query (searches across multiple fields including phone)
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(lead => {
+        // Convert phone to string for searching (handles numeric phone numbers)
+        const phoneStr = String(lead.customer_phone || '').toLowerCase();
+        const customerName = (lead.customer_name || '').toLowerCase();
+        const customerAddress = (lead.customer_address || '').toLowerCase();
+        
+        return (
+          customerName.includes(query) ||
+          customerAddress.includes(query) ||
+          phoneStr.includes(query)
+        );
+      });
+    }
+
+    // Apply pagination to filtered results
+    const pageSize = pagination.limit;
+    const pageNumber = pagination.page;
+    const from = (pageNumber - 1) * pageSize;
+    const to = from + pageSize;
+    const paginatedLeads = filtered.slice(from, to);
+
+    setLeads(paginatedLeads);
+    setPagination(prev => ({
+      ...prev,
+      total: filtered.length,
+      totalPages: Math.ceil(filtered.length / pageSize),
+    }));
+  }, [allLeads, searchQuery, pagination.page, pagination.limit]);
 
   const fetchLeads = async () => {
     if (!profile) return;
@@ -148,9 +233,18 @@ export default function ViewLeadsPage() {
           userId: user.id,
           companyId: profile.company_id,
           roleName: roleName,
-          page: pagination.page,
-          limit: pagination.limit,
-          search: searchQuery,
+          // Remove pagination and search from API - fetch all leads, filter client-side
+          page: 1,
+          limit: 10000, // Fetch all leads (large limit to get all)
+          search: '', // Remove search from API - will filter client-side
+          filters: {
+            executiveId: filterExecutive,
+            status: filterStatus,
+            visitStatus: filterVisitStatus,
+            singleDate: filterSingleDate,
+            dateFrom: filterDateFrom,
+            dateTo: filterDateTo,
+          },
         }),
       });
 
@@ -161,12 +255,10 @@ export default function ViewLeadsPage() {
         return;
       }
 
-      setLeads(json.leads || []);
-      setPagination(prev => ({
-        ...prev,
-        total: json.pagination?.total || 0,
-        totalPages: json.pagination?.totalPages || 0,
-      }));
+      // Store all leads for client-side filtering (like work orders)
+      const fetchedLeads = json.leads || [];
+      setAllLeads(fetchedLeads);
+      // The client-side filtering useEffect will handle setting leads and pagination
     } catch (err: any) {
       console.error('Error fetching leads:', err);
       alert(err.message || 'Failed to fetch leads');
@@ -178,14 +270,14 @@ export default function ViewLeadsPage() {
   const formatDate = (dateString: string) => {
     if (!dateString) return 'N/A';
     const date = new Date(dateString);
-    const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
     const year = date.getFullYear();
     const hours = String(date.getHours()).padStart(2, '0');
     const minutes = String(date.getMinutes()).padStart(2, '0');
     const ampm = date.getHours() >= 12 ? 'PM' : 'AM';
     const displayHours = date.getHours() % 12 || 12;
-    return `${day}/${month}/${year} ${displayHours}:${minutes} ${ampm}`;
+    return `${month}/${day}/${year} ${displayHours}:${minutes} ${ampm}`;
   };
 
   const formatPhoneNumber = (phone: string | number) => {
@@ -505,9 +597,14 @@ export default function ViewLeadsPage() {
         } : {}),
       };
 
-      // Update leads array immediately
+      // Update both leads and allLeads arrays immediately (optimistic update)
       setLeads(prevLeads => 
         prevLeads.map(lead => 
+          lead.id === editingLead.id ? updatedLead : lead
+        )
+      );
+      setAllLeads(prevAllLeads => 
+        prevAllLeads.map(lead => 
           lead.id === editingLead.id ? updatedLead : lead
         )
       );
@@ -552,17 +649,6 @@ export default function ViewLeadsPage() {
     alert('PDF export feature coming soon');
   };
 
-  // Generate date range options (last 30 days)
-  const generateDateOptions = () => {
-    const dates = [];
-    const today = new Date();
-    for (let i = 0; i < 30; i++) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
-      dates.push(date.toISOString().split('T')[0]);
-    }
-    return dates;
-  };
 
   if (loading && !profile) {
     return <LoadingSpinner fullScreen text="Loading..." />;
@@ -626,31 +712,114 @@ export default function ViewLeadsPage() {
             </div>
           </div>
 
-          {/* Date Range Filter */}
-          <div className="overflow-x-auto">
-            <div className="flex gap-2 min-w-max pb-2">
-              {generateDateOptions().map((date) => {
-                const dateObj = new Date(date);
-                const isSelected = selectedDateRange === date;
-                return (
-                  <button
-                    key={date}
-                    onClick={() => {
-                      setSelectedDateRange(isSelected ? '' : date);
-                      setPagination(prev => ({ ...prev, page: 1 }));
-                    }}
-                    className={`
-                      whitespace-nowrap px-4 py-2 rounded-md text-sm font-medium transition-colors
-                      ${isSelected
-                        ? 'bg-accent text-white'
-                        : 'bg-white border border-border text-foreground hover:bg-accent/10'
-                      }
-                    `}
-                  >
-                    {dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                  </button>
-                );
-              })}
+          {/* Filters Section */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Sales Executive Filter - Only for Admin, Super Admin, and Sales Lead */}
+            {(roleName === 'Admin' || roleName === 'Super Admin' || roleName === 'salesLead') && (
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">Sales Executive</label>
+                <select
+                  value={filterExecutive}
+                  onChange={(e) => {
+                    setFilterExecutive(e.target.value);
+                    setPagination(prev => ({ ...prev, page: 1 }));
+                  }}
+                  className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
+                >
+                  <option value="">All Executives</option>
+                  {executiveOptions.map((exec) => (
+                    <option key={exec.id} value={exec.id}>
+                      {exec.full_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Status Filter */}
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1">Status</label>
+              <select
+                value={filterStatus}
+                onChange={(e) => {
+                  setFilterStatus(e.target.value);
+                  setPagination(prev => ({ ...prev, page: 1 }));
+                }}
+                className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
+              >
+                <option value="">All Status</option>
+                <option value="Interested">Interested</option>
+                <option value="Not Interested">Not Interested</option>
+                <option value="Follow Up Required">Follow Up Required</option>
+              </select>
+            </div>
+
+            {/* Visit Status Filter */}
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1">Visit Status</label>
+              <select
+                value={filterVisitStatus}
+                onChange={(e) => {
+                  setFilterVisitStatus(e.target.value);
+                  setPagination(prev => ({ ...prev, page: 1 }));
+                }}
+                className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
+              >
+                <option value="">All Visits</option>
+                <option value="First Visit">First Visit</option>
+                <option value="Second Visit">Second Visit</option>
+                <option value="Third Visit">Third Visit</option>
+              </select>
+            </div>
+
+          </div>
+
+          {/* Date Filters */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Single Date Picker */}
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1">Single Date</label>
+              <input
+                type="date"
+                value={filterSingleDate}
+                onChange={(e) => {
+                  setFilterSingleDate(e.target.value);
+                  setFilterDateFrom('');
+                  setFilterDateTo('');
+                  setPagination(prev => ({ ...prev, page: 1 }));
+                }}
+                className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
+              />
+            </div>
+
+            {/* Date Range - From */}
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1">Date From</label>
+              <input
+                type="date"
+                value={filterDateFrom}
+                onChange={(e) => {
+                  setFilterDateFrom(e.target.value);
+                  setFilterSingleDate('');
+                  setPagination(prev => ({ ...prev, page: 1 }));
+                }}
+                className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
+              />
+            </div>
+
+            {/* Date Range - To */}
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1">Date To</label>
+              <input
+                type="date"
+                value={filterDateTo}
+                onChange={(e) => {
+                  setFilterDateTo(e.target.value);
+                  setFilterSingleDate('');
+                  setPagination(prev => ({ ...prev, page: 1 }));
+                }}
+                className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
+              />
             </div>
           </div>
         </div>

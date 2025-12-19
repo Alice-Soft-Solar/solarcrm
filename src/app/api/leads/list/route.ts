@@ -191,7 +191,7 @@ export async function POST(request: NextRequest) {
       latitude: lead.latitude || null,
       longitude: lead.longitude || null,
       visit_status: lead.visit_status || 'First Visit',
-      executive_name: null, // Will be populated below
+      executive_name: null as string | null, // Will be populated below - allows string or null
     }));
     
     // Fetch executive names separately (more reliable than joins)

@@ -199,11 +199,11 @@ export async function sendWhatsAppMessage(
       
       // Log provider-side outcome (this is expected behavior, not an error)
       console.warn('[WhatsApp API] Provider response (expected volatility):', {
-        status: response.status,
-        statusText: response.statusText,
+          status: response.status,
+          statusText: response.statusText,
         reason: errorMessage,
         note: 'Provider state is volatile - this is observational, not a system failure',
-      });
+        });
       
       return {
         success: false,

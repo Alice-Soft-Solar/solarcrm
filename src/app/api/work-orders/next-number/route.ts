@@ -39,30 +39,49 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Get company code from company table if not provided
     let companyCode = company_code;
+    // Normalize provided company code (remove spaces, uppercase)
+    if (companyCode) {
+      companyCode = companyCode.replace(/\s+/g, '').toUpperCase();
+    }
+    
     if (!companyCode) {
       const { data: company, error: companyError } = await supabase
         .from('companies')
-        .select('code, name')
+        .select('name')
         .eq('id', company_id)
         .single();
 
-      if (companyError || !company) {
-        // If company table doesn't have code, try to extract from name or use default
-        // For now, we'll use first 3 letters of company name or default to "GMS"
-        if (company?.name) {
-          companyCode = company.name.toUpperCase().slice(0, 3).padEnd(3, 'X');
-        } else {
-          companyCode = 'GMS'; // Default company code
-        }
+      if (companyError) {
+        console.error('Error fetching company:', companyError);
+        return NextResponse.json(
+          { error: `Failed to fetch company: ${companyError.message}` },
+          { status: 400 }
+        );
+      }
+
+      if (!company) {
+        return NextResponse.json(
+          { error: `Company with ID ${company_id} not found` },
+          { status: 404 }
+        );
+      }
+
+      if (company.name) {
+        // Remove all spaces first, then extract first 3 characters
+        // Example: "GM Solar" -> "GMSOLAR" -> "GMS"
+        const cleanName = company.name.replace(/\s+/g, '').toUpperCase();
+        companyCode = cleanName.slice(0, 3).padEnd(3, 'X');
       } else {
-        companyCode = company.code || company.name.toUpperCase().slice(0, 3).padEnd(3, 'X');
+        return NextResponse.json(
+          { error: `Company ${company_id} has no name. Please update the company record.` },
+          { status: 400 }
+        );
       }
     }
 
-    // Ensure company code is exactly 3 characters
-    companyCode = companyCode.toUpperCase().slice(0, 3).padEnd(3, 'X');
+    // Ensure company code is exactly 3 characters (remove spaces, uppercase, extract first 3, pad if needed)
+    companyCode = companyCode.replace(/\s+/g, '').toUpperCase().slice(0, 3).padEnd(3, 'X');
 
     // Get current year and month
     const { year, month } = getCurrentYearMonth();

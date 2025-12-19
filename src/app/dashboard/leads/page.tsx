@@ -6,6 +6,7 @@ import { useEffect, useState, useMemo } from 'react';
 import DashboardLayout from '@/components/layouts/DashboardLayout';
 import { LoadingSpinner, Button } from '@/components/ui';
 import LeadForm, { LeadFormData } from '@/components/leads/LeadForm';
+import { getAccessToken } from '@/lib/supabase-client';
 
 interface Lead {
   id: string;
@@ -141,10 +142,15 @@ export default function ViewLeadsPage() {
       }
 
       try {
+        const accessToken = getAccessToken();
         const execResponse = await fetch('/api/leads/executives', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+          },
           body: JSON.stringify({
+            ...(accessToken && { access_token: accessToken }),
             companyId: profile.company_id,
             roleName: roleName,
             currentUserId: profile.id,
@@ -224,19 +230,17 @@ export default function ViewLeadsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      const accessToken = getAccessToken();
       const response = await fetch('/api/leads/list', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
         },
         body: JSON.stringify({
-          userId: user.id,
-          companyId: profile.company_id,
-          roleName: roleName,
-          // Remove pagination and search from API - fetch all leads, filter client-side
+          ...(accessToken && { access_token: accessToken }),
           page: 1,
           limit: 10000, // Fetch all leads (large limit to get all)
-          search: '', // Remove search from API - will filter client-side
           filters: {
             executiveId: filterExecutive,
             status: filterStatus,
@@ -508,8 +512,6 @@ export default function ViewLeadsPage() {
         },
         body: JSON.stringify({
           lead_id: lead.id,
-          userId: user.id,
-          roleName: roleName,
         }),
       });
 
@@ -566,12 +568,19 @@ export default function ViewLeadsPage() {
       // Sales can only update status and visit_status
       // (already included in updatePayload)
 
+      // Get session token for authentication (RLS enforcement)
+      const accessToken = getAccessToken();
+
       const response = await fetch('/api/leads/update', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
         },
-        body: JSON.stringify(updatePayload),
+        body: JSON.stringify({
+          ...(accessToken && { access_token: accessToken }),
+          ...updatePayload,
+        }),
       });
 
       const json = await response.json();
@@ -635,8 +644,11 @@ export default function ViewLeadsPage() {
     }
   };
 
-  const handleRefresh = () => {
-    fetchLeads();
+  const handleRefresh = async () => {
+    // Reset pagination to first page
+    setPagination(prev => ({ ...prev, page: 1 }));
+    // Fetch fresh data from server
+    await fetchLeads();
   };
 
   const handleExportExcel = () => {

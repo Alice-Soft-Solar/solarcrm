@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 import DashboardLayout from '@/components/layouts/DashboardLayout';
 import { LoadingSpinner } from '@/components/ui';
 import LeadForm, { LeadFormData } from '@/components/leads/LeadForm';
+import { getAccessToken } from '@/lib/supabase-client';
 
 interface Profile {
   id: string;
@@ -91,10 +92,15 @@ export default function NewLeadPage() {
         // Fetch executives via API route to bypass RLS and ensure proper data fetching
         if (currentRoleName === 'Admin' || currentRoleName === 'Super Admin' || currentRoleName === 'salesLead') {
           try {
+            const accessToken = getAccessToken();
             const execResponse = await fetch('/api/leads/executives', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+              },
               body: JSON.stringify({
+                ...(accessToken && { access_token: accessToken }),
                 companyId: profileData.company_id,
                 roleName: currentRoleName,
                 currentUserId: user.id,
@@ -185,8 +191,16 @@ export default function NewLeadPage() {
         fd.append('photo', photoFile);
       }
 
+      const accessToken = getAccessToken();
+      if (accessToken) {
+        fd.append('access_token', accessToken);
+      }
+
       const res = await fetch('/api/leads/create', {
         method: 'POST',
+        headers: {
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+        },
         body: fd,
       });
 

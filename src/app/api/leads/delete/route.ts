@@ -1,16 +1,36 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient, verifyUserAndGetProfile, isAdmin as checkIsAdmin } from '@/lib/supabase-server';
 
 /**
  * API route to delete a lead
  * 
- * Only Admin and Super Admin can delete leads
+ * Security: RLS enforced + Server-side verification
+ * - Uses cookie-based authentication (automatic)
+ * - Verifies user identity from database (not frontend)
+ * - Only Admin/Super Admin can delete leads
  */
 
 export async function DELETE(request: NextRequest) {
   try {
+    // Step 1: Create authenticated Supabase client (uses cookies)
+    const supabase = await createServerClient(request);
+
+    // Step 2: Verify user and get verified profile/role from database
+    const { userId, roleName } = await verifyUserAndGetProfile(supabase, request);
+
+    // Step 3: Check authorization - only Admin/Super Admin can delete
+    const isAdmin = checkIsAdmin(roleName);
+    
+    if (!isAdmin) {
+      return NextResponse.json(
+        { error: 'Unauthorized: Only Admin and Super Admin can delete leads' },
+        { status: 403 }
+      );
+    }
+
+    // Step 4: Parse request body
     const body = await request.json();
-    const { lead_id, userId, roleName } = body;
+    const { lead_id } = body;
 
     if (!lead_id) {
       return NextResponse.json(
@@ -19,39 +39,21 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    if (!userId || !roleName) {
+    // Step 5: Verify lead exists and user has access (RLS enforces this)
+    const { data: existingLead, error: fetchError } = await supabase
+      .from('leads')
+      .select('id, company_id')
+      .eq('id', lead_id)
+      .single();
+
+    if (fetchError || !existingLead) {
       return NextResponse.json(
-        { error: 'User ID and role name are required' },
-        { status: 400 }
+        { error: 'Lead not found or access denied' },
+        { status: 404 }
       );
     }
 
-    // Only Admin and Super Admin can delete
-    if (roleName !== 'Admin' && roleName !== 'Super Admin') {
-      return NextResponse.json(
-        { error: 'Only Admin and Super Admin can delete leads' },
-        { status: 403 }
-      );
-    }
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !supabaseServiceKey) {
-      return NextResponse.json(
-        { error: 'Supabase configuration missing' },
-        { status: 500 }
-      );
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
-
-    // Delete lead
+    // Step 6: Delete lead (RLS enforces access)
     const { error } = await supabase
       .from('leads')
       .delete()
@@ -69,13 +71,20 @@ export async function DELETE(request: NextRequest) {
       success: true,
       message: 'Lead deleted successfully',
     });
-  } catch (error: unknown) {
+  } catch (error: any) {
     console.error('API Error deleting lead:', error);
-    const errorMessage = error instanceof Error ? error.message : 'An error occurred';
+    
+    // Handle authentication errors
+    if (error.message?.includes('Unauthorized')) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 401 }
+      );
+    }
+    
     return NextResponse.json(
-      { error: errorMessage },
+      { error: error.message || 'An error occurred' },
       { status: 500 }
     );
   }
 }
-

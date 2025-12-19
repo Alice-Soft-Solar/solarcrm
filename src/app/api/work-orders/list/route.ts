@@ -1,64 +1,45 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient, verifyUserAndGetProfile, hasRole, getServiceClient } from '@/lib/supabase-server';
+
+/**
+ * API route to fetch work orders list
+ * 
+ * Security: RLS enforced + Server-side verification
+ * - Uses cookie-based authentication (automatic)
+ * - Verifies user identity from database (not frontend)
+ * - RLS policies filter data at database level
+ */
 
 export async function POST(request: NextRequest) {
   try {
-    let body;
-    try {
-      body = await request.json();
-    } catch (parseError) {
-      return NextResponse.json(
-        { error: 'Invalid JSON in request body' },
-        { status: 400 }
-      );
-    }
+    // Step 1: Create authenticated Supabase client (uses cookies)
+    const supabase = await createServerClient(request);
 
-    const { userId, companyId, roleName, page = 1, limit = 50 } = body;
+    // Step 2: Verify user and get verified profile/role from database
+    const { userId, companyId, roleName } = await verifyUserAndGetProfile(supabase, request);
 
-    if (!userId) {
+    // Step 3: Check authorization - only specific roles can access work orders
+    const allowedRoles = ['Sales', 'salesLead', 'Admin', 'Super Admin', 'Inventory'];
+    if (!hasRole(roleName, allowedRoles)) {
       return NextResponse.json(
-        { error: 'User ID is required' },
-        { status: 400 }
-      );
-    }
-
-    // Validate roleName
-     const allowedRoles = ['Sales', 'Admin', 'Super Admin', 'Inventory'];
-    if (!roleName || !allowedRoles.includes(roleName)) {
-      return NextResponse.json(
-        { error: 'Invalid or missing role. Only Sales, Admin, Super Admin, and Inventory can access work orders.' },
+        { error: 'Unauthorized: You do not have access to work orders' },
         { status: 403 }
       );
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl) {
-      console.error('NEXT_PUBLIC_SUPABASE_URL is not configured');
-      return NextResponse.json(
-        { error: 'Supabase URL not configured' },
-        { status: 500 }
-      );
+    // Step 4: Parse pagination parameters (if sent in body)
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch (e) {
+      // No body is fine, use defaults
     }
 
-    if (!supabaseServiceKey) {
-      console.error('SUPABASE_SERVICE_ROLE_KEY is not configured');
-      return NextResponse.json(
-        { error: 'Service role key not configured' },
-        { status: 500 }
-      );
-    }
+    const { page = 1, limit = 50 } = body;
 
-    // Use service role key to bypass RLS
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
-
-    // Build query based on role
+    // Step 5: Build query with RLS enforcement
+    // Note: RLS policies automatically filter based on user's role and company
+    // This manual filtering is an additional safety layer
     const isAdmin = roleName === 'Admin' || roleName === 'Super Admin';
     
     let query = supabase
@@ -86,29 +67,24 @@ export async function POST(request: NextRequest) {
       .order('created_at', { ascending: false });
 
     // Add pagination
-    const pageSize = Math.min(Math.max(parseInt(limit) || 50, 1), 100); // Limit between 1-100
+    const pageSize = Math.min(Math.max(parseInt(limit) || 50, 1), 100);
     const pageNumber = Math.max(parseInt(page) || 1, 1);
     const from = (pageNumber - 1) * pageSize;
     const to = from + pageSize - 1;
     
     query = query.range(from, to);
 
-    // Filter based on role
+    // Additional filtering (RLS + manual for defense in depth)
     if (roleName === 'Sales') {
-      // Sales can only see their own work orders
+      // Sales see only their own work orders
       query = query.eq('sales_executive_id', userId);
     } else if (roleName === 'Inventory') {
-      // Inventory can see work orders with status "To Be Dispatched" and "Dispatched" in their company
-      // Also include NULL status to catch work orders that meet 65%+ payment but trigger hasn't run
-      if (companyId) {
-        query = query.eq('company_id', companyId);
-      }
-      query = query.or('work_order_status.eq.To Be Dispatched,work_order_status.eq.Dispatched,work_order_status.is.null');
-    } else if (roleName === 'Admin' || roleName === 'Super Admin') {
-      // Admin/Super Admin can see all work orders in their company
-      if (companyId) {
-        query = query.eq('company_id', companyId);
-      }
+      // Inventory sees ONLY "To Be Dispatched" and "Dispatched" orders (NO NULL status)
+      query = query.eq('company_id', companyId);
+      query = query.or('work_order_status.eq.To Be Dispatched,work_order_status.eq.Dispatched');
+    } else if (isAdmin) {
+      // Admin sees all company work orders
+      query = query.eq('company_id', companyId);
     }
 
     const { data, error } = await query;
@@ -125,7 +101,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Fetch company names and sales executive names
+    // Fetch additional data (company names, sales executive names)
     let transformedData = data || [];
     if (transformedData.length > 0) {
       // Get unique company IDs
@@ -139,7 +115,6 @@ export async function POST(request: NextRequest) {
       const companyMap: Record<string, string> = {};
       if (companyIds.length > 0 && companyIds.length <= 100) {
         try {
-          // Filter out any invalid IDs
           const validCompanyIds = companyIds.filter((id: any) => id && typeof id === 'string' && id.length > 0);
           
           if (validCompanyIds.length > 0) {
@@ -150,11 +125,6 @@ export async function POST(request: NextRequest) {
 
             if (companiesError) {
               console.error('Error fetching company names:', companiesError);
-              // Check if error message contains HTML (indicating a network/proxy issue)
-              if (typeof companiesError.message === 'string' && companiesError.message.includes('<html>')) {
-                console.error('Received HTML error response - possible network/proxy issue');
-              }
-              // Continue without company names rather than failing completely
             } else if (companiesData && Array.isArray(companiesData)) {
               companiesData.forEach((company: any) => {
                 if (company && company.id) {
@@ -165,60 +135,45 @@ export async function POST(request: NextRequest) {
           }
         } catch (err) {
           console.error('Exception fetching company names:', err);
-          // Continue without company names
         }
-      } else if (companyIds.length > 100) {
-        console.warn('Too many company IDs to fetch in one query, skipping company names');
       }
 
-      // For Admin/Super Admin, fetch sales executive names
+      // Fetch sales executive names for all roles (not just Admin)
       const salesExecMap: Record<string, string> = {};
-      if (isAdmin) {
-        // Get unique sales executive IDs
-        const salesExecIds = [...new Set(
-          transformedData
-            .map((order: any) => order.sales_executive_id)
-            .filter((id: string | null) => id !== null)
-        )];
+      const salesExecIds = [...new Set(
+        transformedData
+          .map((order: any) => order.sales_executive_id)
+          .filter((id: string | null) => id !== null)
+      )];
 
-        // Fetch sales executive names
-        if (salesExecIds.length > 0 && salesExecIds.length <= 100) {
-          try {
-            // Filter out any invalid IDs
-            const validSalesExecIds = salesExecIds.filter((id: any) => id && typeof id === 'string' && id.length > 0);
-            
-            if (validSalesExecIds.length > 0) {
-              const { data: profilesData, error: profilesError } = await supabase
-                .from('profiles')
-                .select('id, full_name')
-                .in('id', validSalesExecIds);
+      if (salesExecIds.length > 0 && salesExecIds.length <= 100) {
+        try {
+          const validSalesExecIds = salesExecIds.filter((id: any) => id && typeof id === 'string' && id.length > 0);
+          
+          if (validSalesExecIds.length > 0) {
+            // Use service client to bypass RLS for profile lookup (same as leads route)
+            const serviceClient = getServiceClient();
+            const { data: profilesData, error: profilesError } = await serviceClient
+              .from('profiles')
+              .select('id, full_name')
+              .in('id', validSalesExecIds);
 
-              if (profilesError) {
-                console.error('Error fetching sales executive names:', profilesError);
-                // Check if error message contains HTML (indicating a network/proxy issue)
-                if (typeof profilesError.message === 'string' && profilesError.message.includes('<html>')) {
-                  console.error('Received HTML error response - possible network/proxy issue');
+            if (profilesError) {
+              console.error('Error fetching sales executive names:', profilesError);
+            } else if (profilesData && Array.isArray(profilesData)) {
+              profilesData.forEach((profile: any) => {
+                if (profile && profile.id) {
+                  salesExecMap[profile.id] = profile.full_name || 'N/A';
                 }
-                // Continue without sales executive names rather than failing completely
-              } else if (profilesData && Array.isArray(profilesData)) {
-                profilesData.forEach((profile: any) => {
-                  if (profile && profile.id) {
-                    salesExecMap[profile.id] = profile.full_name || 'N/A';
-                  }
-                });
-              }
+              });
             }
-          } catch (err) {
-            console.error('Exception fetching sales executive names:', err);
-            // Continue without sales executive names
           }
-        } else if (salesExecIds.length > 100) {
-          console.warn('Too many sales executive IDs to fetch in one query, skipping names');
+        } catch (err) {
+          console.error('Exception fetching sales executive names:', err);
         }
       }
 
       // Calculate work_order_status for orders where it's NULL
-      // This handles cases where the trigger hasn't run yet
       const workOrderIdsNeedingStatus = transformedData
         .filter((order: any) => !order.work_order_status)
         .map((order: any) => order.id);
@@ -226,14 +181,12 @@ export async function POST(request: NextRequest) {
       const statusMap: Record<string, string | null> = {};
       
       if (workOrderIdsNeedingStatus.length > 0) {
-        // Fetch payments for work orders with NULL status
         const { data: paymentsData, error: paymentsError } = await supabase
           .from('payments_data')
           .select('work_order_id, first_payment, second_payment, final_payment, additional_payment')
           .in('work_order_id', workOrderIdsNeedingStatus);
 
         if (!paymentsError && paymentsData) {
-          // Group payments by work_order_id and calculate totals
           const paymentsByWorkOrder: Record<string, any[]> = {};
           paymentsData.forEach((payment: any) => {
             if (!paymentsByWorkOrder[payment.work_order_id]) {
@@ -242,14 +195,12 @@ export async function POST(request: NextRequest) {
             paymentsByWorkOrder[payment.work_order_id].push(payment);
           });
 
-          // Calculate status for each work order
           workOrderIdsNeedingStatus.forEach((workOrderId: string) => {
             const workOrder = transformedData.find((o: any) => o.id === workOrderId);
             if (!workOrder) return;
 
             const payments = paymentsByWorkOrder[workOrderId] || [];
             
-            // Calculate total paid (same logic as trigger)
             let totalPaid = 0;
             payments.forEach((payment: any) => {
               totalPaid += parseFloat(payment.first_payment || 0);
@@ -260,7 +211,6 @@ export async function POST(request: NextRequest) {
 
             const orderAmount = parseFloat(workOrder.order_amount?.toString() || '0');
             
-            // Determine status
             if (orderAmount > 0 && totalPaid >= orderAmount * 0.65) {
               statusMap[workOrderId] = 'To Be Dispatched';
             } else {
@@ -270,47 +220,107 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Add company names, sales executive names, and calculated status to work orders
+      // Add company names, sales executive names, and calculated status
       transformedData = transformedData.map((order: any) => ({
         ...order,
         company_name: order.company_id 
           ? companyMap[order.company_id] || 'N/A'
           : 'N/A',
-        ...(isAdmin && {
-          sales_executive_name: order.sales_executive_id 
-            ? salesExecMap[order.sales_executive_id] || 'N/A'
-            : 'N/A',
-        }),
-        // Use calculated status if work_order_status is NULL, otherwise use the database value
+        sales_executive_name: order.sales_executive_id 
+          ? salesExecMap[order.sales_executive_id] || 'N/A'
+          : 'N/A',
         work_order_status: order.work_order_status || statusMap[order.id] || null,
       }));
 
-      // For Inventory role, show work orders with "To Be Dispatched" and "Dispatched" status
-      // This allows inventory to see both pending dispatch and already dispatched orders
+      // For Inventory role: Show "To Be Dispatched" and "Dispatched" orders
+      // IMPORTANT: Trust database status - if status is "To Be Dispatched" in DB, it was already verified
+      // The query at line 84 already filters for these statuses, so we trust what comes from DB
+      // Only verify payment for NULL status orders that were calculated to be "To Be Dispatched" (from statusMap)
       if (roleName === 'Inventory') {
-        transformedData = transformedData.filter((order: any) => 
-          order.work_order_status === 'To Be Dispatched' || order.work_order_status === 'Dispatched'
-        );
+        // Track which orders have status from database vs calculated
+        const originalDataMap = new Map(data.map((d: any) => [d.id, d.work_order_status]));
+        
+        // Separate orders: DB status (trusted) vs calculated status (needs verification)
+        const ordersNeedingVerification = transformedData.filter((order: any) => {
+          // If status is "To Be Dispatched" but wasn't in original DB query, it's calculated
+          return order.work_order_status === 'To Be Dispatched' && 
+                 originalDataMap.get(order.id) !== 'To Be Dispatched';
+        });
+
+        // Only verify payment for calculated "To Be Dispatched" orders
+        if (ordersNeedingVerification.length > 0) {
+          const calculatedIds = ordersNeedingVerification.map((o: any) => o.id);
+          
+          const { data: paymentsData } = await supabase
+            .from('payments_data')
+            .select('work_order_id, first_payment, second_payment, final_payment, additional_payment')
+            .in('work_order_id', calculatedIds);
+
+          if (paymentsData && paymentsData.length > 0) {
+            const paymentsByWorkOrder: Record<string, number> = {};
+            paymentsData.forEach((payment: any) => {
+              const workOrderId = payment.work_order_id;
+              if (!paymentsByWorkOrder[workOrderId]) {
+                paymentsByWorkOrder[workOrderId] = 0;
+              }
+              paymentsByWorkOrder[workOrderId] += parseFloat(payment.first_payment || 0);
+              paymentsByWorkOrder[workOrderId] += parseFloat(payment.second_payment || 0);
+              paymentsByWorkOrder[workOrderId] += parseFloat(payment.final_payment || 0);
+              paymentsByWorkOrder[workOrderId] += parseFloat(payment.additional_payment || 0);
+            });
+
+            // Filter: Include all "Dispatched", all DB "To Be Dispatched" (trusted), and verified calculated "To Be Dispatched"
+            transformedData = transformedData.filter((order: any) => {
+              if (order.work_order_status === 'Dispatched') {
+                return true; // Always include "Dispatched"
+              }
+              if (order.work_order_status === 'To Be Dispatched') {
+                // If it came from DB, trust it (already verified)
+                if (originalDataMap.get(order.id) === 'To Be Dispatched') {
+                  return true;
+                }
+                // If calculated, verify payment >= 65%
+                const totalPaid = paymentsByWorkOrder[order.id] || 0;
+                const orderAmount = parseFloat(order.order_amount?.toString() || '0');
+                return orderAmount > 0 && totalPaid >= orderAmount * 0.65;
+              }
+              return false;
+            });
+          } else {
+            // No payment data - trust DB status, filter out unverified calculated orders
+            transformedData = transformedData.filter((order: any) => {
+              if (order.work_order_status === 'Dispatched') {
+                return true;
+              }
+              if (order.work_order_status === 'To Be Dispatched') {
+                // Only include if it came from DB (trusted)
+                return originalDataMap.get(order.id) === 'To Be Dispatched';
+              }
+              return false;
+            });
+          }
+        } else {
+          // No calculated orders - show all "To Be Dispatched" and "Dispatched" (all from DB, trusted)
+          transformedData = transformedData.filter((order: any) => 
+            order.work_order_status === 'Dispatched' || order.work_order_status === 'To Be Dispatched'
+          );
+        }
       }
     }
 
-    // Get total count for pagination (without limit)
+    // Get total count for pagination
     let countQuery = supabase
       .from('work_orders')
       .select('id', { count: 'exact', head: true });
 
     // Apply same filters for count
-    if (roleName === 'Sales') {
+    if (roleName === 'Sales' || roleName === 'salesLead') {
       countQuery = countQuery.eq('sales_executive_id', userId);
     } else if (roleName === 'Inventory') {
-      if (companyId) {
-        countQuery = countQuery.eq('company_id', companyId);
-      }
-      countQuery = countQuery.or('work_order_status.eq.To Be Dispatched,work_order_status.eq.Dispatched,work_order_status.is.null');
-    } else if (roleName === 'Admin' || roleName === 'Super Admin') {
-      if (companyId) {
-        countQuery = countQuery.eq('company_id', companyId);
-      }
+      countQuery = countQuery.eq('company_id', companyId);
+      countQuery = countQuery.or('work_order_status.eq.To Be Dispatched,work_order_status.eq.Dispatched');
+    } else if (isAdmin) {
+      countQuery = countQuery.eq('company_id', companyId);
     }
 
     const { count } = await countQuery;
@@ -324,13 +334,20 @@ export async function POST(request: NextRequest) {
         totalPages: Math.ceil((count || 0) / pageSize),
       },
     });
-  } catch (error: unknown) {
+  } catch (error: any) {
     console.error('API Error fetching work orders:', error);
-    const errorMessage = error instanceof Error ? error.message : 'An error occurred';
+    
+    // Handle authentication errors
+    if (error.message?.includes('Unauthorized')) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 401 }
+      );
+    }
+    
     return NextResponse.json(
-      { error: errorMessage },
+      { error: error.message || 'An error occurred' },
       { status: 500 }
     );
   }
 }
-

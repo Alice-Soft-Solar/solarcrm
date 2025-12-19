@@ -6,6 +6,7 @@ import { useEffect, useState, useMemo, Suspense } from 'react';
 import DashboardLayout from '@/components/layouts/DashboardLayout';
 import { LoadingSpinner } from '@/components/ui';
 import StatCard from '@/components/dashboard/StatCard';
+import { getAccessToken } from '@/lib/supabase-client';
 import ChartCard from '@/components/dashboard/ChartCard';
 import {
   BarChart,
@@ -169,13 +170,15 @@ function DashboardContent() {
         const filterSalesExecutive = searchParams.get('salesExecutive') || '';
         const filterPlantCapacity = searchParams.get('plantCapacity') || '';
 
+        const accessToken = getAccessToken();
         const statsResponse = await fetch('/api/dashboard/stats', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+          },
           body: JSON.stringify({
-            userId: user.id,
-            companyId: normalizedProfile.company_id,
-            roleName,
+            ...(accessToken && { access_token: accessToken }),
             filters: {
               searchQuery,
               filterCompany,
@@ -220,16 +223,18 @@ function DashboardContent() {
   const isSales = roleName === 'Sales';
   // Show leads section for Sales, Sales Lead, Admin, and Super Admin
   const showLeadsSection = isSales || isSalesLead || isAdmin;
+  // Show work orders section for roles with access (Sales Lead now has access)
+  const showWorkOrdersSection = (isAdmin || isSales || isSalesLead || roleName === 'Inventory') && stats?.workOrders;
 
   // Prepare chart data
-  const statusChartData = stats?.charts.statusDistribution
+  const statusChartData = stats?.charts?.statusDistribution
     ? Object.entries(stats.charts.statusDistribution).map(([name, value]) => ({
         name,
         value,
       }))
     : [];
 
-  const paymentsChartData = stats?.charts.paymentsByDay || [];
+  const paymentsChartData = stats?.charts?.paymentsByDay || [];
 
   const formatCurrency = (amount: number) => {
     return `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
@@ -425,68 +430,69 @@ function DashboardContent() {
           </>
         )}
 
-        {/* KPI Cards - Work Orders */}
-        <div>
-          <h2 className="text-xl font-semibold text-foreground mb-4">Work Orders Overview</h2>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-
-            <StatCard
-              title="Total Work Orders"
-              value={stats?.workOrders.total || 0}
-              subtitle="All time"
-              icon={
-                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              }
-              color="blue"
-            />
-            <StatCard
-              title="Pending"
-              value={stats?.workOrders.pending || 0}
-              subtitle="Awaiting action"
-              icon={
-                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              }
-              color="orange"
-            />
-            <StatCard
-              title="To Be Dispatched"
-              value={stats?.workOrders.toBeDispatched || 0}
-              subtitle="Ready for dispatch"
-              icon={
-                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                </svg>
-              }
-              color="purple"
-            />
-            <StatCard
-              title="Dispatched"
-              value={stats?.workOrders.dispatched || 0}
-              subtitle="Successfully dispatched"
-              icon={
-                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-              }
-              color="green"
-            />
-            <StatCard
-              title="Closed"
-              value={stats?.workOrders.closed || 0}
-              subtitle="Completed orders"
-              icon={
-                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              }
-              color="blue"
-            />
+        {/* KPI Cards - Work Orders (Only for roles with work order access - explicitly deny Sales Lead) */}
+        {showWorkOrdersSection && (
+          <div>
+            <h2 className="text-xl font-semibold text-foreground mb-4">Work Orders Overview</h2>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+              <StatCard
+                title="Total Work Orders"
+                value={stats.workOrders.total || 0}
+                subtitle="All time"
+                icon={
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                }
+                color="blue"
+              />
+              <StatCard
+                title="Pending"
+                value={stats.workOrders.pending || 0}
+                subtitle="Awaiting action"
+                icon={
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                }
+                color="orange"
+              />
+              <StatCard
+                title="To Be Dispatched"
+                value={stats.workOrders.toBeDispatched || 0}
+                subtitle="Ready for dispatch"
+                icon={
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                  </svg>
+                }
+                color="purple"
+              />
+              <StatCard
+                title="Dispatched"
+                value={stats.workOrders.dispatched || 0}
+                subtitle="Successfully dispatched"
+                icon={
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                }
+                color="green"
+              />
+              <StatCard
+                title="Closed"
+                value={stats.workOrders.closed || 0}
+                subtitle="Completed orders"
+                icon={
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                }
+                color="blue"
+              />
+            </div>
           </div>
-        </div>
+        )}
 
         {/* KPI Cards - Payments */}
         {isAdmin && (
@@ -600,9 +606,13 @@ function DashboardContent() {
                     cx="50%"
                     cy="50%"
                     labelLine={false}
-                    label={({ name, percent }) => 
-                      `${name}: ${((percent || 0) * 100).toFixed(0)}%`
-                    }
+                    label={({ name, percent, value }) => {
+                      // Only show label if value > 0 and percent >= 5% to avoid overlapping
+                      if (value === 0 || (percent || 0) < 0.05) {
+                        return null;
+                      }
+                      return `${name}: ${((percent || 0) * 100).toFixed(0)}%`;
+                    }}
                     outerRadius={100}
                     innerRadius={40}
                     paddingAngle={5}

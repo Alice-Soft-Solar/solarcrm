@@ -79,9 +79,16 @@ export function isValidPhoneNumber(phone: string): boolean {
 /**
  * Sends a WhatsApp text message via Whapi.Cloud API
  * 
+ * IMPORTANT: WhatsApp is observational, not transactional.
+ * Provider errors (e.g., "Channel not found", "Trial limit exceeded") are
+ * expected behavior due to volatile provider state, not system failures.
+ * 
+ * This function observes provider responses and returns outcomes.
+ * It never throws - all outcomes are returned as results.
+ * 
  * @param params - Message parameters (to, body)
  * @param apiToken - Whapi.Cloud API token (optional, will use env var if not provided)
- * @returns Promise with response data
+ * @returns Promise with response data (always returns, never throws)
  */
 export async function sendWhatsAppMessage(
   params: WhatsAppMessageParams,
@@ -158,10 +165,8 @@ export async function sendWhatsAppMessage(
       requestBody.mentions = params.mentions;
     }
 
-    // Log request for debugging (without sensitive data)
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[WhatsApp API] Sending message to:', formattedPhone.substring(0, 4) + '****');
-    }
+    // Log attempt (observational logging)
+    console.log('[WhatsApp API] Attempting to send message to:', formattedPhone.substring(0, 4) + '****');
 
     const response = await fetch('https://gate.whapi.cloud/messages/text', {
       method: 'POST',
@@ -180,21 +185,25 @@ export async function sendWhatsAppMessage(
       data = await response.json();
     } else {
       const text = await response.text();
-      throw new Error(`Unexpected response format: ${text}`);
+      // Non-JSON response is an observation, not an error
+      console.warn('[WhatsApp API] Provider returned non-JSON response:', text.substring(0, 100));
+      return {
+        success: false,
+        error: `Provider returned unexpected response format`,
+      };
     }
 
+    // Observe provider response (provider errors are expected, not failures)
     if (!response.ok) {
-      // Handle API error responses
-      const errorMessage = data.error || data.message || data.detail || data.errors?.[0]?.message || `HTTP ${response.status}: ${response.statusText}`;
+      const errorMessage = data.error?.message || data.error || data.message || data.detail || data.errors?.[0]?.message || `HTTP ${response.status}: ${response.statusText}`;
       
-      // Log error for debugging
-      if (process.env.NODE_ENV === 'development') {
-        console.error('[WhatsApp API] Error response:', {
-          status: response.status,
-          statusText: response.statusText,
-          data: data,
-        });
-      }
+      // Log provider-side outcome (this is expected behavior, not an error)
+      console.warn('[WhatsApp API] Provider response (expected volatility):', {
+        status: response.status,
+        statusText: response.statusText,
+        reason: errorMessage,
+        note: 'Provider state is volatile - this is observational, not a system failure',
+      });
       
       return {
         success: false,
@@ -205,15 +214,23 @@ export async function sendWhatsAppMessage(
     // Extract message ID from response (API may return different field names)
     const messageId = data.id || data.message_id || data.messageId || data.messages?.[0]?.id || undefined;
 
+    // Log successful observation
+    console.log('[WhatsApp API] Provider accepted message:', {
+      messageId: messageId || 'not provided',
+      note: 'Provider accepted - delivery is best-effort, not guaranteed',
+    });
+
     return {
       success: true,
       messageId: messageId,
     };
   } catch (error) {
+    // Network/system errors are also observations, not failures
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    console.warn('[WhatsApp API] Network/system error (observational):', errorMessage);
     return {
       success: false,
-      error: `Failed to send WhatsApp message: ${errorMessage}`,
+      error: `Network/system error: ${errorMessage}`,
     };
   }
 }

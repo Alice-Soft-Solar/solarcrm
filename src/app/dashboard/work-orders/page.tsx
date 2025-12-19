@@ -6,6 +6,7 @@ import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import PageHeader from '@/components/PageHeader';
 import { LoadingSpinner, Button } from '@/components/ui';
+import { getAccessToken } from '@/lib/supabase-client';
 
 interface User {
   id: string;
@@ -127,15 +128,15 @@ export default function WorkOrdersPage() {
 
         console.log('✅ Profile found:', profileData);
 
-        // Check if user has authorized role (Sales, Admin, or Super Admin)
+        // Check if user has authorized role (Sales, Sales Lead, Admin, or Super Admin)
         const roles = profileData.roles as { role_name: string } | { role_name: string }[];
         const roleName = Array.isArray(roles) ? roles[0]?.role_name : roles?.role_name;
         
-        const allowedRoles = ['Sales', 'Admin', 'Super Admin'];
+        const allowedRoles = ['Sales', 'salesLead', 'Admin', 'Super Admin'];
         if (!roleName || !allowedRoles.includes(roleName)) {
           console.warn('⚠️ Unauthorized role:', roleName);
           if (isMounted) {
-            alert('You do not have permission to create work orders. Only Sales, Admin, and Super Admin can create work orders.');
+            alert('You do not have permission to create work orders. Only Sales, Sales Lead, Admin, and Super Admin can create work orders.');
             router.push('/dashboard');
           }
           return;
@@ -406,12 +407,15 @@ export default function WorkOrdersPage() {
       }
 
       // Create work order via API route (uses service role key, bypasses RLS)
+      const accessToken = getAccessToken();
       const response = await fetch('/api/work-orders/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
         },
         body: JSON.stringify({
+          ...(accessToken && { access_token: accessToken }),
           company_id: profile.company_id,
           sales_executive_id: user.id,
           work_order_number: formData.work_order_number,

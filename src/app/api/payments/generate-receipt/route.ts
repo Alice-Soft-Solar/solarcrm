@@ -63,9 +63,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Fetch company details with super_base_id and logo
+    // Note: companies table doesn't have 'address' column - removed from select
     const { data: company, error: companyError } = await supabase
       .from('companies')
-      .select('name, address, phone, super_base_id, logo_url')
+      .select('name, phone, super_base_id, logo_url')
       .eq('id', company_id)
       .single();
 
@@ -180,7 +181,7 @@ export async function POST(request: NextRequest) {
       receiptNumber,
       receiptDate: payment.receipt_generated_at || payment.created_at || new Date().toISOString(),
       companyName: displayCompanyName,
-      companyAddress: company?.address || '',
+      companyAddress: '', // companies table doesn't have address column
       companyPhone: company?.phone || '',
       companyLogoUrl: logoUrl,
       customerName: workOrder.customer_name,

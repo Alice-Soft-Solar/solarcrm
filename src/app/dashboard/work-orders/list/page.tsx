@@ -6,6 +6,7 @@ import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import PageHeader from '@/components/PageHeader';
 import { LoadingSpinner, Button } from '@/components/ui';
+import { getAccessToken } from '@/lib/supabase-client';
 
 interface WorkOrder {
   id: string;
@@ -197,7 +198,7 @@ export default function WorkOrdersListPage() {
         const currentRoleName = Array.isArray(roles) ? roles[0]?.role_name : roles?.role_name;
 
         // Check authorization
-        const allowedRoles = ['Sales', 'Admin', 'Super Admin', 'Inventory'];
+        const allowedRoles = ['Sales', 'salesLead', 'Admin', 'Super Admin', 'Inventory'];
         if (!currentRoleName || !allowedRoles.includes(currentRoleName)) {
           if (isMounted) {
             alert('You do not have permission to view work orders.');
@@ -214,12 +215,15 @@ export default function WorkOrdersListPage() {
         // Fetch work orders via API route
         let response;
         try {
+          const accessToken = getAccessToken();
           response = await fetch('/api/work-orders/list', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
           },
           body: JSON.stringify({
+            ...(accessToken && { access_token: accessToken }),
             userId: currentUser.id,
             companyId: profileData.company_id,
               roleName: currentRoleName,
@@ -546,12 +550,15 @@ export default function WorkOrdersListPage() {
       
       // Refresh work orders list to update status
       if (user && profile && roleName) {
+        const accessToken = getAccessToken();
         const refreshResponse = await fetch('/api/work-orders/list', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
           },
           body: JSON.stringify({
+            ...(accessToken && { access_token: accessToken }),
             userId: user.id,
             companyId: profile.company_id,
             roleName: roleName,
@@ -725,12 +732,15 @@ export default function WorkOrdersListPage() {
       
       // Refresh work orders list
       if (user && profile && roleName) {
+        const accessToken = getAccessToken();
         const refreshResponse = await fetch('/api/work-orders/list', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
           },
           body: JSON.stringify({
+            ...(accessToken && { access_token: accessToken }),
             userId: user.id,
             companyId: profile.company_id,
             roleName: roleName,
@@ -855,8 +865,8 @@ export default function WorkOrdersListPage() {
       return true;
     }
     
-    // Sales can only edit their own work orders
-    if (roleName === 'Sales') {
+    // Sales and Sales Lead can only edit their own work orders
+    if (roleName === 'Sales' || roleName === 'salesLead') {
       return order.sales_executive_id === user.id;
     }
     
@@ -880,12 +890,15 @@ export default function WorkOrdersListPage() {
 
     setMarkingDispatched(true);
     try {
+      const accessToken = getAccessToken();
       const response = await fetch('/api/work-orders/mark-dispatched', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
         },
         body: JSON.stringify({
+          ...(accessToken && { access_token: accessToken }),
           work_order_id: selectedWorkOrder.id,
           user_id: user.id,
           company_id: profile.company_id,
@@ -902,12 +915,15 @@ export default function WorkOrdersListPage() {
 
       // Refresh work orders list
       if (user && profile && roleName) {
+        const accessToken = getAccessToken();
         const refreshResponse = await fetch('/api/work-orders/list', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
           },
           body: JSON.stringify({
+            ...(accessToken && { access_token: accessToken }),
             userId: user.id,
             companyId: profile.company_id,
             roleName: roleName,
@@ -1155,12 +1171,15 @@ export default function WorkOrdersListPage() {
 
       // Refresh the work orders list
       if (user && profile && roleName) {
+        const accessToken = getAccessToken();
         const refreshResponse = await fetch('/api/work-orders/list', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
           },
           body: JSON.stringify({
+            ...(accessToken && { access_token: accessToken }),
             userId: user.id,
             companyId: profile.company_id,
             roleName: roleName,
@@ -1208,12 +1227,15 @@ export default function WorkOrdersListPage() {
 
     setDeleteLoading(true);
     try {
+      const accessToken = getAccessToken();
       const response = await fetch('/api/work-orders/delete', {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
         },
         body: JSON.stringify({
+          ...(accessToken && { access_token: accessToken }),
           work_order_id: deletingWorkOrder.id,
           userId: user.id,
           companyId: profile.company_id,
@@ -1373,28 +1395,6 @@ export default function WorkOrdersListPage() {
 
             {/* Filter Row */}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              {/* Company Filter - Hidden for Admin and Super Admin */}
-              {(roleName !== 'Admin' && roleName !== 'Super Admin') && (
-                <div>
-                  <label htmlFor="filter-company" className="block text-sm font-medium text-foreground mb-2">
-                    Company
-                  </label>
-                  <select
-                    id="filter-company"
-                    value={filterCompany}
-                    onChange={(e) => setFilterCompany(e.target.value)}
-                    className="block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
-                  >
-                    <option value="">All Companies</option>
-                    {uniqueCompanies.map((company) => (
-                      <option key={company} value={company}>
-                        {company}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
               {/* Sales Executive Filter (only for Admin/Super Admin) */}
               {roleName !== 'Sales' && (
                 <div>
@@ -1470,6 +1470,9 @@ export default function WorkOrdersListPage() {
               <table className="min-w-full divide-y divide-zinc-200">
                 <thead className="bg-[#F8F9FA]">
                   <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground opacity-70">
+                      Actions
+                    </th>
                     {roleName === 'Inventory' && (
                       <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground opacity-70">
                         Dispatched
@@ -1487,12 +1490,7 @@ export default function WorkOrdersListPage() {
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground opacity-70">
                       Phone
                     </th>
-                    {(roleName !== 'Admin' && roleName !== 'Super Admin') && (
-                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground opacity-70">
-                        Company
-                      </th>
-                    )}
-                    {roleName !== 'Sales' && (
+                    {roleName !== 'Sales' && roleName !== 'salesLead' && (
                       <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground opacity-70">
                         Sales Executive
                       </th>
@@ -1515,97 +1513,11 @@ export default function WorkOrdersListPage() {
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground opacity-70">
                       Created
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground opacity-70">
-                      Actions
-                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-200 bg-white">
                   {workOrders.map((order) => (
                     <tr key={order.id} className="hover:bg-white transition-colors duration-150 cursor-pointer">
-                      {roleName === 'Inventory' && (
-                        <td className="whitespace-nowrap px-6 py-4 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={order.work_order_status === 'Dispatched'}
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              // Checkbox is controlled, so it won't change until status updates
-                              if (!e.target.checked) return; // Only allow checking, not unchecking
-                              if (order.work_order_status === 'To Be Dispatched') {
-                                openDispatchModal(order);
-                              }
-                            }}
-                            disabled={order.work_order_status !== 'To Be Dispatched'}
-                            className="h-4 w-4 rounded border-zinc-300 text-[#0BC28E] focus:ring-[#0BC28E] focus:ring-offset-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                          />
-                        </td>
-                      )}
-                      <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-foreground">
-                        {order.work_order_number}
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-sm">
-                        {order.work_order_status ? (
-                          <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                            order.work_order_status === 'To Be Dispatched' 
-                              ? 'bg-green-100 text-green-800' 
-                              : order.work_order_status === 'Dispatched'
-                              ? 'bg-blue-100 text-blue-800'
-                              : 'bg-gray-100 text-gray-800'
-                          }`}>
-                            {order.work_order_status}
-                          </span>
-                        ) : (
-                          <span className="text-[#1E1E1E] opacity-50">—</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-foreground opacity-70">
-                        <div>
-                          <div className="font-medium text-foreground">
-                            {order.customer_name}
-                          </div>
-                          <div className="text-xs text-foreground opacity-70">
-                            {order.customer_address}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
-                        {order.customer_phone}
-                      </td>
-                      {(roleName !== 'Admin' && roleName !== 'Super Admin') && (
-                        <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
-                          {order.company_name || 'N/A'}
-                        </td>
-                      )}
-                      {roleName !== 'Sales' && (
-                        <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
-                          {order.sales_executive_name || 'N/A'}
-                        </td>
-                      )}
-                      <td className="px-6 py-4 text-sm text-foreground opacity-70">
-                        <div className="max-w-xs truncate" title={order.site_details || 'N/A'}>
-                          {order.site_details || 'N/A'}
-                        </div>
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
-                        {order.structure_height || 'N/A'}
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
-                        {order.roof_type || 'N/A'}
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
-                        {order.plant_capacity 
-                          ? (order.plant_capacity.endsWith('kW') 
-                              ? order.plant_capacity 
-                              : `${order.plant_capacity}kW`)
-                          : 'N/A'}
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-foreground">
-                        {formatCurrency(order.order_amount)}
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
-                        {formatDate(order.created_at)}
-                      </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm">
                         <div className="flex items-center gap-2">
                           <button
@@ -1661,23 +1573,101 @@ export default function WorkOrdersListPage() {
                               className="text-red-600 hover:text-red-700 transition-colors duration-150"
                               title="Delete Work Order"
                             >
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  className="h-5 w-5"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                  strokeWidth={2}
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                                  />
-                                </svg>
-                              </button>
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                className="h-5 w-5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth={2}
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                />
+                              </svg>
+                            </button>
                           )}
                         </div>
+                      </td>
+                      {roleName === 'Inventory' && (
+                        <td className="whitespace-nowrap px-6 py-4 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={order.work_order_status === 'Dispatched'}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              // Checkbox is controlled, so it won't change until status updates
+                              if (!e.target.checked) return; // Only allow checking, not unchecking
+                              if (order.work_order_status === 'To Be Dispatched') {
+                                openDispatchModal(order);
+                              }
+                            }}
+                            disabled={order.work_order_status !== 'To Be Dispatched'}
+                            className="h-4 w-4 rounded border-zinc-300 text-[#0BC28E] focus:ring-[#0BC28E] focus:ring-offset-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          />
+                        </td>
+                      )}
+                      <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-foreground">
+                        {order.work_order_number}
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4 text-sm">
+                        {order.work_order_status ? (
+                          <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                            order.work_order_status === 'To Be Dispatched' 
+                              ? 'bg-green-100 text-green-800' 
+                              : order.work_order_status === 'Dispatched'
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            {order.work_order_status}
+                          </span>
+                        ) : (
+                          <span className="text-[#1E1E1E] opacity-50">—</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-foreground opacity-70">
+                        <div>
+                          <div className="font-medium text-foreground">
+                            {order.customer_name}
+                          </div>
+                          <div className="text-xs text-foreground opacity-70">
+                            {order.customer_address}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
+                        {order.customer_phone}
+                      </td>
+                      {roleName !== 'Sales' && (
+                        <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
+                          {order.sales_executive_name || 'N/A'}
+                        </td>
+                      )}
+                      <td className="px-6 py-4 text-sm text-foreground opacity-70">
+                        <div className="max-w-xs truncate" title={order.site_details || 'N/A'}>
+                          {order.site_details || 'N/A'}
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
+                        {order.structure_height || 'N/A'}
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
+                        {order.roof_type || 'N/A'}
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
+                        {order.plant_capacity 
+                          ? (order.plant_capacity.endsWith('kW') 
+                              ? order.plant_capacity 
+                              : `${order.plant_capacity}kW`)
+                          : 'N/A'}
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-foreground">
+                        {formatCurrency(order.order_amount)}
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
+                        {formatDate(order.created_at)}
                       </td>
                     </tr>
                   ))}
@@ -1742,7 +1732,7 @@ export default function WorkOrdersListPage() {
                           <p className="text-base text-[#1E1E1E] font-medium">{selectedWorkOrder.company_name || 'N/A'}</p>
                         </div>
                       )}
-                      {roleName !== 'Sales' && (
+                      {roleName !== 'Sales' && roleName !== 'salesLead' && (
                         <div>
                           <label className="block text-sm font-semibold text-[#1E1E1E] opacity-80 mb-1">Sales Executive</label>
                           <p className="text-base text-[#1E1E1E] font-medium">{selectedWorkOrder.sales_executive_name || 'N/A'}</p>

@@ -43,6 +43,7 @@ export default function EmployeesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentRoleName, setCurrentRoleName] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
@@ -90,6 +91,7 @@ export default function EmployeesPage() {
         return;
       }
 
+      setCurrentRoleName(roleName);
       setCurrentUserId(user.id);
       await Promise.all([fetchEmployees(user.id), fetchRoles(), fetchCompanies()]);
     } catch (err) {
@@ -562,7 +564,7 @@ export default function EmployeesPage() {
           </div>
         )}
 
-        <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow">
+        <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow">
           <table className="min-w-full divide-y divide-zinc-200">
             <thead className="bg-zinc-50">
               <tr>
@@ -578,9 +580,15 @@ export default function EmployeesPage() {
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground opacity-70">
                   Role
                 </th>
+                {/* Company column - Hidden for Admin role */}
+                {currentRoleName === 'Super Admin' && (
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground opacity-70">
                   Company
                 </th>
+                )}
+                {/* <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground opacity-70">
+                  Company
+                </th> */}
                 <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-foreground opacity-70">
                   Actions
                 </th>
@@ -603,9 +611,15 @@ export default function EmployeesPage() {
                       ? employee.roles[0]?.role_name || 'N/A'
                       : employee.roles?.role_name || 'N/A'}
                   </td>
+                  {/* Company cell - Hidden for Admin role */}
+                  {currentRoleName === 'Super Admin' && (
                   <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
                     {employee.company_name || 'N/A'}
                   </td>
+                  )}
+                  {/* <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
+                    {employee.company_name || 'N/A'}
+                  </td> */}
                   <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-medium">
                     <button
                       onClick={() => handleEdit(employee)}

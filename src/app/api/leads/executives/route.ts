@@ -1,49 +1,45 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient, verifyUserAndGetProfile, getServiceClient } from '@/lib/supabase-server';
 
 /**
  * API route to fetch executives for lead assignment dropdown
- * Uses service role key to bypass RLS and ensure proper data fetching
+ * Uses authenticated client with RLS enforcement
  */
 export async function POST(request: NextRequest) {
   try {
+    // Step 1: Read request body first (before any other operations that might consume it)
     const body = await request.json();
     const { companyId, roleName, currentUserId, currentUserFullName } = body;
 
-    if (!companyId) {
+    // Step 2: Create authenticated Supabase client
+    const supabase = await createServerClient(request);
+
+    // Step 3: Verify user and get verified profile/role from database
+    const { userId, companyId: verifiedCompanyId, roleName: verifiedRoleName } = await verifyUserAndGetProfile(supabase, request);
+
+    // Use verified companyId from server, not from request body
+    const targetCompanyId = verifiedCompanyId || companyId;
+    const targetRoleName = verifiedRoleName || roleName;
+
+    if (!targetCompanyId) {
       return NextResponse.json(
         { error: 'Company ID is required' },
         { status: 400 }
       );
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !supabaseServiceKey) {
-      return NextResponse.json(
-        { error: 'Supabase configuration missing' },
-        { status: 500 }
-      );
-    }
-
-    // Use service role key to bypass RLS
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
+    // Use service client for fetching profiles (bypasses RLS for this lookup only)
+    const serviceClient = getServiceClient();
 
     // Fetch all profiles from the same company
-    const { data: profiles, error: profilesError } = await supabase
+    const { data: profiles, error: profilesError } = await serviceClient
       .from('profiles')
       .select(`
         id,
         full_name,
         roles (role_name)
       `)
-      .eq('company_id', companyId);
+      .eq('company_id', targetCompanyId);
 
     if (profilesError) {
       console.error('Error fetching profiles:', profilesError);
@@ -60,7 +56,7 @@ export async function POST(request: NextRequest) {
 
     let executives: ExecutiveOption[] = [];
 
-    if (roleName === 'Admin' || roleName === 'Super Admin') {
+    if (targetRoleName === 'Admin' || targetRoleName === 'Super Admin') {
       // Admin/Super Admin: Show Sales executives and Sales Leads
       executives = (profiles || [])
         .filter((p: any) => {
@@ -72,7 +68,7 @@ export async function POST(request: NextRequest) {
           id: p.id,
           full_name: p.full_name || 'Unnamed',
         }));
-    } else if (roleName === 'Sales') {
+    } else if (targetRoleName === 'Sales') {
       // Sales: Show only Sales Lead accounts
       executives = (profiles || [])
         .filter((p: any) => {
@@ -84,7 +80,7 @@ export async function POST(request: NextRequest) {
           id: p.id,
           full_name: p.full_name || 'Unnamed',
         }));
-    } else if (roleName === 'salesLead') {
+    } else if (targetRoleName === 'salesLead') {
       // Sales Lead: Show only Sales executives (not other Sales Leads) + themselves
       const salesExecs = (profiles || [])
         .filter((p: any) => {
@@ -101,7 +97,7 @@ export async function POST(request: NextRequest) {
       executives = [
         ...salesExecs,
         {
-          id: currentUserId,
+          id: userId || currentUserId,
           full_name: currentUserFullName || 'Unnamed',
         },
       ];

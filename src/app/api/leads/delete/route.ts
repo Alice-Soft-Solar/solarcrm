@@ -71,11 +71,11 @@ export async function DELETE(request: NextRequest) {
       success: true,
       message: 'Lead deleted successfully',
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('API Error deleting lead:', error);
     
     // Handle authentication errors
-    if (error.message?.includes('Unauthorized')) {
+    if (error instanceof Error && error.message?.includes('Unauthorized')) {
       return NextResponse.json(
         { error: error.message },
         { status: 401 }
@@ -83,7 +83,7 @@ export async function DELETE(request: NextRequest) {
     }
     
     return NextResponse.json(
-      { error: error.message || 'An error occurred' },
+      { error: error instanceof Error ? error.message : 'An error occurred' },
       { status: 500 }
     );
   }

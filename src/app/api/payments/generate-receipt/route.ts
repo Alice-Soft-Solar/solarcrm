@@ -258,10 +258,10 @@ export async function POST(request: NextRequest) {
         receipt_generated_at: updatedPayment.receipt_generated_at,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('API Error generating receipt:', error);
     return NextResponse.json(
-      { error: error.message || 'An error occurred while generating receipt' },
+      { error: error instanceof Error ? error.message : 'An error occurred while generating receipt' },
       { status: 500 }
     );
   }

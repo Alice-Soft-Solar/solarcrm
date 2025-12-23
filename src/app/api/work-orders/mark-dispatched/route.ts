@@ -187,10 +187,10 @@ export async function POST(request: NextRequest) {
       workOrder: updatedWorkOrder,
       message: 'Work order marked as dispatched and customer notified',
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('API Error marking as dispatched:', error);
     return NextResponse.json(
-      { error: error.message || 'An error occurred' },
+      { error: error instanceof Error ? error.message : 'An error occurred' },
       { status: 500 }
     );
   }

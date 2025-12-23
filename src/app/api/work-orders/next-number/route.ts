@@ -136,10 +136,10 @@ export async function POST(request: NextRequest) {
       year,
       month,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error generating work order number:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to generate work order number' },
+      { error: error instanceof Error ? error.message : 'Failed to generate work order number' },
       { status: 500 }
     );
   }

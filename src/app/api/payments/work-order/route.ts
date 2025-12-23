@@ -115,10 +115,10 @@ export async function POST(request: NextRequest) {
         paymentPercentage: paymentPercentage.toFixed(2),
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('API Error fetching payments:', error);
     return NextResponse.json(
-      { error: error.message || 'An error occurred' },
+      { error: error instanceof Error ? error.message : 'An error occurred' },
       { status: 500 }
     );
   }

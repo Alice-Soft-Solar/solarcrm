@@ -122,11 +122,11 @@ export async function PUT(request: NextRequest) {
       success: true,
       lead: data,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('API Error updating lead:', error);
     
     // Handle authentication errors
-    if (error.message?.includes('Unauthorized')) {
+    if (error instanceof Error && error.message?.includes('Unauthorized')) {
       return NextResponse.json(
         { error: error.message },
         { status: 401 }
@@ -134,7 +134,7 @@ export async function PUT(request: NextRequest) {
     }
     
     return NextResponse.json(
-      { error: error.message || 'An error occurred' },
+      { error: error instanceof Error ? error.message : 'An error occurred' },
       { status: 500 }
     );
   }

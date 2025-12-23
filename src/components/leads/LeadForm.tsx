@@ -153,22 +153,22 @@ export default function LeadForm({
       setLocationStatus('✅ Location captured');
       setLocationLoading(false);
       return true;
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn('Location error:', err);
-      console.warn('Error code:', err.code);
-      console.warn('Error message:', err.message);
+      console.warn('Error code:', err instanceof GeolocationPositionError ? err.code : 'N/A');
+      console.warn('Error message:', err instanceof Error ? err.message : 'Unknown error');
       
       // More specific error messages
-      if (err.message && err.message.includes('HTTPS')) {
+      if (err instanceof Error && err.message && err.message.includes('HTTPS')) {
         // Not in secure context
         setLocationStatus('⚠️ Geolocation requires HTTPS. Please use https:// or localhost.');
-      } else if (err.code === 1) {
+      } else if (err instanceof GeolocationPositionError && err.code === 1) {
         // PERMISSION_DENIED
         setLocationStatus('⚠️ Location permission denied. Please allow location access in browser settings.');
-      } else if (err.code === 2) {
+      } else if (err instanceof GeolocationPositionError && err.code === 2) {
         // POSITION_UNAVAILABLE
         setLocationStatus('⚠️ Location unavailable. Please check GPS settings.');
-      } else if (err.code === 3) {
+      } else if (err instanceof GeolocationPositionError && err.code === 3) {
         // TIMEOUT
         setLocationStatus('⚠️ Location request timed out. Please try again.');
       } else {

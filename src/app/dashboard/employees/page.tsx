@@ -223,9 +223,9 @@ export default function EmployeesPage() {
         }));
         setEmployees(updatedEmployees as Employee[]);
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error in fetchEmployees:', error);
-      alert(`Error loading employees: ${error.message}`);
+      alert(`Error loading employees: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setEmployees([]);
     }
   };
@@ -315,8 +315,8 @@ export default function EmployeesPage() {
       if (currentUserId) {
         await fetchEmployees(currentUserId);
       }
-    } catch (error: any) {
-      alert(error.message || 'An error occurred');
+    } catch (error: unknown) {
+      alert(error instanceof Error ? error.message : 'An error occurred');
     }
   };
 
@@ -355,8 +355,8 @@ export default function EmployeesPage() {
       if (currentUserId) {
         await fetchEmployees(currentUserId);
       }
-    } catch (error: any) {
-      alert(error.message || 'An error occurred');
+    } catch (error: unknown) {
+      alert(error instanceof Error ? error.message : 'An error occurred');
     }
   };
 

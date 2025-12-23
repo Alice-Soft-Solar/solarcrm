@@ -146,10 +146,10 @@ export async function PUT(request: NextRequest) {
         orderAmount,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('API Error updating payment:', error);
     return NextResponse.json(
-      { error: error.message || 'An error occurred' },
+      { error: error instanceof Error ? error.message : 'An error occurred' },
       { status: 500 }
     );
   }

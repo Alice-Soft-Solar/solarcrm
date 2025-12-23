@@ -29,6 +29,7 @@ export async function POST(request: NextRequest) {
     const isSalesLead = checkIsSalesLead(roleName);
     const isSales = checkIsSales(roleName);
     const isInventory = roleName === 'Inventory';
+    const isAccounts = roleName === 'Accounts';
 
     // Step 4: Initialize response structure
     const response: any = {
@@ -48,7 +49,7 @@ export async function POST(request: NextRequest) {
       try {
         if (isSalesLead) {
           // Sales Lead: Calculate separate stats for "My Leads" and "Team Leads"
-          
+
           // My Leads: Leads created by the Sales Lead (creator_id = userId)
           const myLeadsQuery = supabase
             .from('leads')
@@ -136,7 +137,7 @@ export async function POST(request: NextRequest) {
 
     // Step 6: Fetch work orders statistics (if user has access)
     // Sales Lead now has access to work orders (same as Sales - only their own)
-    const WORK_ORDER_ALLOWED_ROLES = ['Sales', 'salesLead', 'Admin', 'Super Admin', 'Inventory'];
+    const WORK_ORDER_ALLOWED_ROLES = ['Sales', 'salesLead', 'Admin', 'Super Admin', 'Inventory', 'Accounts'];
     const hasWorkOrderAccess = WORK_ORDER_ALLOWED_ROLES.includes(roleName);
 
     if (hasWorkOrderAccess) {
@@ -149,6 +150,9 @@ export async function POST(request: NextRequest) {
           workOrdersQuery = workOrdersQuery
             .eq('company_id', companyId)
             .or('work_order_status.eq.To Be Dispatched,work_order_status.eq.Dispatched');
+        } else if (isAccounts) {
+          // Accounts: See all company work orders (for count only)
+          workOrdersQuery = workOrdersQuery.eq('company_id', companyId);
         } else if (roleName === 'Sales' || roleName === 'salesLead') {
           // Sales and Sales Lead see only their own work orders
           workOrdersQuery = workOrdersQuery.eq('sales_executive_id', userId);
@@ -165,7 +169,7 @@ export async function POST(request: NextRequest) {
         } else if (workOrdersData) {
           // For Inventory: Need to verify 65% payment for "To Be Dispatched" status
           let filteredWorkOrders = workOrdersData;
-          
+
           if (isInventory) {
             // Get work order IDs that need payment verification
             const toBeDispatchedIds = workOrdersData
@@ -213,7 +217,7 @@ export async function POST(request: NextRequest) {
 
           // Calculate statistics from filtered data
           const total = filteredWorkOrders.length;
-          
+
           // Status counts
           const toBeDispatched = filteredWorkOrders.filter((w: any) => w.work_order_status === 'To Be Dispatched').length;
           const dispatched = filteredWorkOrders.filter((w: any) => w.work_order_status === 'Dispatched').length;
@@ -275,7 +279,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Step 7: Fetch payments statistics (Admin only)
+    // Step 7: Fetch payments statistics (Admin and Accounts)
     if (isAdmin) {
       try {
         const { data: paymentsData, error: paymentsError } = await supabase
@@ -342,6 +346,33 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Step 7b: Fetch simple counts for Accounts role
+    if (isAccounts) {
+      try {
+        // Total payments count (RLS will filter by company)
+        const { count: totalPayments, error: totalPaymentsError } = await supabase
+          .from('payments_data')
+          .select('*', { count: 'exact', head: true });
+
+        // Pending payments count (RLS will filter by company)
+        const { count: pendingPayments, error: pendingPaymentsError } = await supabase
+          .from('payments_data')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', 'pending');
+
+        if (totalPaymentsError || pendingPaymentsError) {
+          console.error('Error fetching accounts payments stats:', totalPaymentsError || pendingPaymentsError);
+        } else {
+          response.stats.payments = {
+            totalCount: totalPayments || 0,
+            pending: pendingPayments || 0,
+          };
+        }
+      } catch (err) {
+        console.error('Exception fetching accounts payments stats:', err);
+      }
+    }
+
     // Step 8: Fetch dispatch statistics (Admin only)
     if (isAdmin) {
       try {
@@ -390,19 +421,19 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(response);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Dashboard stats error:', error);
-    
+
     // Handle authentication errors
-    if (error.message?.includes('Unauthorized')) {
+    if (error instanceof Error && error.message?.includes('Unauthorized')) {
       return NextResponse.json(
         { error: error.message },
         { status: 401 }
       );
     }
-    
+
     return NextResponse.json(
-      { error: error.message || 'Failed to fetch dashboard stats' },
+      { error: error instanceof Error ? error.message : 'Failed to fetch dashboard stats' },
       { status: 500 }
     );
   }

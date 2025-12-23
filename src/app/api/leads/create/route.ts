@@ -131,11 +131,11 @@ export async function POST(request: NextRequest) {
       },
       { status: 201 }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('API Error creating lead:', error);
     
     // Handle authentication errors
-    if (error.message?.includes('Unauthorized')) {
+    if (error instanceof Error && error.message?.includes('Unauthorized')) {
       return NextResponse.json(
         { error: error.message },
         { status: 401 }
@@ -143,7 +143,7 @@ export async function POST(request: NextRequest) {
     }
     
     return NextResponse.json(
-      { error: error.message || 'An unexpected error occurred' },
+      { error: error instanceof Error ? error.message : 'An unexpected error occurred' },
       { status: 500 }
     );
   }

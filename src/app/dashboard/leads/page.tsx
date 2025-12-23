@@ -166,7 +166,7 @@ export default function ViewLeadsPage() {
         } else {
           console.error('Error fetching executives:', await execResponse.json());
         }
-      } catch (error) {
+      } catch (error: unknown) {
         console.error('Error fetching executives:', error);
       }
     };
@@ -263,9 +263,9 @@ export default function ViewLeadsPage() {
       const fetchedLeads = json.leads || [];
       setAllLeads(fetchedLeads);
       // The client-side filtering useEffect will handle setting leads and pagination
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error fetching leads:', err);
-      alert(err.message || 'Failed to fetch leads');
+      alert(err instanceof Error ? err.message : 'Failed to fetch leads');
     } finally {
       setLoading(false);
     }
@@ -527,9 +527,9 @@ export default function ViewLeadsPage() {
       if (isViewModalOpen) {
         setIsViewModalOpen(false);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error deleting lead:', err);
-      alert(err.message || 'Failed to delete lead');
+      alert(err instanceof Error ? err.message : 'Failed to delete lead');
     }
   };
 
@@ -550,7 +550,17 @@ export default function ViewLeadsPage() {
       }
 
       // Build update payload based on role
-      const updatePayload: any = {
+      const updatePayload: {
+        lead_id: string;
+        visit_status: string;
+        status: string;
+        customer_name?: string;
+        customer_phone?: string;
+        power_bill?: string;
+        power_units?: string;
+        customer_address?: string;
+        referer?: string;
+      } = {
         lead_id: editingLead.id,
         visit_status: finalVisitStatus,
         status: finalStatus,
@@ -636,9 +646,9 @@ export default function ViewLeadsPage() {
         console.error('Error refreshing leads after update:', err);
         // Don't show error to user as we've already updated state optimistically
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error updating lead:', err);
-      alert(err.message || 'Failed to update lead');
+      alert(err instanceof Error ? err.message : 'Failed to update lead');
     } finally {
       setSaving(false);
     }

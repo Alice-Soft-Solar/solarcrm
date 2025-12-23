@@ -72,6 +72,7 @@ interface DashboardStats {
     todayReceived: number;
     monthlyReceived: number;
     pending: number;
+    totalCount?: number; // For Accounts role
   };
   dispatch: {
     today: number;
@@ -161,8 +162,8 @@ function DashboardContent() {
         const roleName = typeof normalizedProfile.roles === 'object' && 'role_name' in normalizedProfile.roles
           ? normalizedProfile.roles.role_name
           : Array.isArray(normalizedProfile.roles) && normalizedProfile.roles[0]
-          ? normalizedProfile.roles[0].role_name
-          : '';
+            ? normalizedProfile.roles[0].role_name
+            : '';
 
         // Get filters from URL params (synced from work orders page)
         const searchQuery = searchParams.get('search') || '';
@@ -215,12 +216,13 @@ function DashboardContent() {
   const roleName = typeof profile.roles === 'object' && 'role_name' in profile.roles
     ? profile.roles.role_name
     : Array.isArray(profile.roles) && profile.roles[0]
-    ? profile.roles[0].role_name
-    : '';
+      ? profile.roles[0].role_name
+      : '';
 
   const isAdmin = roleName === 'Admin' || roleName === 'Super Admin';
   const isSalesLead = roleName === 'salesLead';
   const isSales = roleName === 'Sales';
+  const isAccounts = roleName === 'Accounts';
   // Show leads section for Sales, Sales Lead, Admin, and Super Admin
   const showLeadsSection = isSales || isSalesLead || isAdmin;
   // Show work orders section for roles with access (Sales Lead now has access)
@@ -229,9 +231,9 @@ function DashboardContent() {
   // Prepare chart data
   const statusChartData = stats?.charts?.statusDistribution
     ? Object.entries(stats.charts.statusDistribution).map(([name, value]) => ({
-        name,
-        value,
-      }))
+      name,
+      value,
+    }))
     : [];
 
   const paymentsChartData = stats?.charts?.paymentsByDay || [];
@@ -256,11 +258,11 @@ function DashboardContent() {
                 Welcome back, <span className="font-semibold text-foreground">{profile.full_name}</span>
               </p>
               <p className="text-sm text-foreground/60">
-                {new Date().toLocaleDateString('en-US', { 
-                  weekday: 'long', 
-                  year: 'numeric', 
-                  month: 'long', 
-                  day: 'numeric' 
+                {new Date().toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
                 })}
               </p>
             </div>
@@ -494,6 +496,48 @@ function DashboardContent() {
           </div>
         )}
 
+        {/* KPI Cards - Accounts Role */}
+        {isAccounts && stats && (
+          <div>
+            <h2 className="text-xl font-semibold text-foreground mb-4">Accounts Overview</h2>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <StatCard
+                title="Total Work Orders"
+                value={stats.workOrders?.total || 0}
+                subtitle="All work orders"
+                icon={
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                }
+                color="blue"
+              />
+              <StatCard
+                title="Total Payments"
+                value={stats.payments?.totalCount || 0}
+                subtitle="All payment records"
+                icon={
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                }
+                color="green"
+              />
+              <StatCard
+                title="Pending Payments"
+                value={stats.payments?.pending || 0}
+                subtitle="Awaiting payment"
+                icon={
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                }
+                color="orange"
+              />
+            </div>
+          </div>
+        )}
+
         {/* KPI Cards - Payments */}
         {isAdmin && (
           <div>
@@ -619,14 +663,14 @@ function DashboardContent() {
                     dataKey="value"
                   >
                     {statusChartData.map((entry, index) => {
-                      const gradientId = 
+                      const gradientId =
                         entry.name === 'Pending' ? 'colorPending' :
-                        entry.name === 'To Be Dispatched' ? 'colorToBeDispatched' :
-                        entry.name === 'Dispatched' ? 'colorDispatched' :
-                        'colorClosed';
+                          entry.name === 'To Be Dispatched' ? 'colorToBeDispatched' :
+                            entry.name === 'Dispatched' ? 'colorDispatched' :
+                              'colorClosed';
                       return (
-                        <Cell 
-                          key={`cell-${index}`} 
+                        <Cell
+                          key={`cell-${index}`}
                           fill={`url(#${gradientId})`}
                           stroke="#fff"
                           strokeWidth={2}
@@ -670,18 +714,18 @@ function DashboardContent() {
                         <stop offset="95%" stopColor="#0BC28E" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid 
-                      strokeDasharray="3 3" 
+                    <CartesianGrid
+                      strokeDasharray="3 3"
                       stroke="#e5e7eb"
                       vertical={false}
                     />
-                    <XAxis 
-                      dataKey="date" 
+                    <XAxis
+                      dataKey="date"
                       stroke="#6b7280"
                       fontSize={12}
                       tickLine={false}
                     />
-                    <YAxis 
+                    <YAxis
                       stroke="#6b7280"
                       fontSize={12}
                       tickLine={false}
@@ -696,7 +740,7 @@ function DashboardContent() {
                       }}
                       formatter={(value: number) => formatCurrency(value)}
                     />
-                    <Legend 
+                    <Legend
                       wrapperStyle={{ paddingTop: '10px' }}
                       iconType="line"
                     />

@@ -106,9 +106,9 @@ export async function POST(request: NextRequest) {
         } else {
           updatedCount++;
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error(`Error processing work order ${workOrder.id}:`, error);
-        errors.push(`Work order ${workOrder.id}: ${error.message}`);
+        errors.push(`Work order ${workOrder.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     }
 
@@ -118,10 +118,10 @@ export async function POST(request: NextRequest) {
       total: workOrders.length,
       errors: errors.length > 0 ? errors : undefined,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('API Error recalculating status:', error);
     return NextResponse.json(
-      { error: error.message || 'An error occurred' },
+      { error: error instanceof Error ? error.message : 'An error occurred' },
       { status: 500 }
     );
   }

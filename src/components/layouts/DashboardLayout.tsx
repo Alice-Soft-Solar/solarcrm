@@ -130,29 +130,29 @@ export default function DashboardLayout({
   const roleName = typeof profile.roles === 'object' && 'role_name' in profile.roles
     ? profile.roles.role_name
     : Array.isArray(profile.roles) && profile.roles[0]
-    ? profile.roles[0].role_name
-    : '';
+      ? profile.roles[0].role_name
+      : '';
 
   // Menu items for app drawer
   const menuItems = [
     // Work Orders - Different access for different roles
-    // Inventory: ONLY "View Work Orders" (no create)
+    // Inventory & Accounts: ONLY "View Work Orders" (no create)
     // Sales Lead & Sales: Both "View" and "Create" (see only their own work orders)
     // Admin & Super Admin: Both "View" and "Create" (see all company work orders)
-    ...(roleName === ROLES.INVENTORY
+    ...(roleName === ROLES.INVENTORY || roleName === 'Accounts'
       ? [
-          {
-            title: 'View All Work Orders',
-            href: '/dashboard/work-orders/list',
-            icon: (
-              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            ),
-          },
-        ]
+        {
+          title: 'View All Work Orders',
+          href: '/dashboard/work-orders/list',
+          icon: (
+            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          ),
+        },
+      ]
       : ([ROLES.SALES, ROLES.SALES_LEAD, ROLES.ADMIN, ROLES.SUPER_ADMIN] as readonly RoleName[]).includes(roleName as RoleName)
-      ? [
+        ? [
           {
             title: 'View All Work Orders',
             href: '/dashboard/work-orders/list',
@@ -172,62 +172,62 @@ export default function DashboardLayout({
             ),
           },
         ]
-      : []),
+        : []),
     // Lead management - Available to Sales, Sales Lead, Admin, Super Admin
     // Sales Lead ONLY sees these two items (Create Lead and View Leads)
     ...((isSalesRole(roleName) || isSalesLeadRole(roleName) || isAdminRole(roleName))
       ? [
-          {
-            title: 'Create Lead',
-            href: '/dashboard/leads/new',
-            icon: (
-              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 4v16m8-8H4"
-                />
-              </svg>
-            ),
-          },
-          {
-            title: 'View Leads',
-            href: '/dashboard/leads',
-            icon: (
-              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                />
-              </svg>
-            ),
-          },
-        ]
+        {
+          title: 'Create Lead',
+          href: '/dashboard/leads/new',
+          icon: (
+            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+          ),
+        },
+        {
+          title: 'View Leads',
+          href: '/dashboard/leads',
+          icon: (
+            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+              />
+            </svg>
+          ),
+        },
+      ]
       : []),
     ...((roleName === 'Admin' || roleName === 'Super Admin')
       ? [
-          {
-            title: 'Employee Management',
-            href: '/dashboard/employees',
-            icon: (
-              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-            ),
-            roles: ['Admin', 'Super Admin'],
-          },
-        ]
+        {
+          title: 'Employee Management',
+          href: '/dashboard/employees',
+          icon: (
+            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+            </svg>
+          ),
+          roles: ['Admin', 'Super Admin'],
+        },
+      ]
       : []),
   ];
 
   return (
     <div className="min-h-screen bg-background">
       {/* Sidebar */}
-      <AppDrawer 
-        roleName={roleName} 
+      <AppDrawer
+        roleName={roleName}
         menuItems={menuItems}
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen(!sidebarOpen)}
@@ -263,31 +263,28 @@ export default function DashboardLayout({
                     </svg>
                   </button>
                 ) : (
-                <button
-                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                  <button
+                    onClick={() => setSidebarOpen(!sidebarOpen)}
                     className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-white text-foreground hover:bg-accent hover:text-white hover:border-accent shadow-sm hover:shadow-md transition-all duration-200 relative z-50 focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2"
-                  aria-label="Toggle menu"
-                >
-                  <div className="flex flex-col gap-1.5">
-                    <span
-                        className={`h-0.5 w-5 bg-current transition-all duration-300 ${
-                        sidebarOpen ? 'rotate-45 translate-y-1.5' : ''
-                      }`}
-                    />
-                    <span
-                        className={`h-0.5 w-5 bg-current transition-all duration-300 ${
-                        sidebarOpen ? 'opacity-0' : ''
-                      }`}
-                    />
-                    <span
-                        className={`h-0.5 w-5 bg-current transition-all duration-300 ${
-                        sidebarOpen ? '-rotate-45 -translate-y-1.5' : ''
-                      }`}
-                    />
-                  </div>
-                </button>
+                    aria-label="Toggle menu"
+                  >
+                    <div className="flex flex-col gap-1.5">
+                      <span
+                        className={`h-0.5 w-5 bg-current transition-all duration-300 ${sidebarOpen ? 'rotate-45 translate-y-1.5' : ''
+                          }`}
+                      />
+                      <span
+                        className={`h-0.5 w-5 bg-current transition-all duration-300 ${sidebarOpen ? 'opacity-0' : ''
+                          }`}
+                      />
+                      <span
+                        className={`h-0.5 w-5 bg-current transition-all duration-300 ${sidebarOpen ? '-rotate-45 -translate-y-1.5' : ''
+                          }`}
+                      />
+                    </div>
+                  </button>
                 )}
-                
+
                 <h1 className={`text-xl font-bold text-foreground ${sidebarOpen ? 'hidden lg:block' : 'block'}`}>
                   Solar CRM
                 </h1>

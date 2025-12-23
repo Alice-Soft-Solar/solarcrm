@@ -65,7 +65,7 @@ export default function WorkOrdersListPage() {
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
   const [profile, setProfile] = useState<{ id: string; company_id: string; roles: { role_name: string } | { role_name: string }[] } | null>(null);
   const [roleName, setRoleName] = useState<string | null>(null);
-  
+
   // Search and filter states
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCompany, setFilterCompany] = useState<string>('');
@@ -163,7 +163,7 @@ export default function WorkOrdersListPage() {
       try {
         // Get current user
         const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
-        
+
         if (userError || !currentUser) {
           if (isMounted) {
             router.push('/login');
@@ -198,7 +198,7 @@ export default function WorkOrdersListPage() {
         const currentRoleName = Array.isArray(roles) ? roles[0]?.role_name : roles?.role_name;
 
         // Check authorization
-        const allowedRoles = ['Sales', 'salesLead', 'Admin', 'Super Admin', 'Inventory'];
+        const allowedRoles = ['Sales', 'salesLead', 'Admin', 'Super Admin', 'Inventory', 'Accounts'];
         if (!currentRoleName || !allowedRoles.includes(currentRoleName)) {
           if (isMounted) {
             alert('You do not have permission to view work orders.');
@@ -217,18 +217,18 @@ export default function WorkOrdersListPage() {
         try {
           const accessToken = getAccessToken();
           response = await fetch('/api/work-orders/list', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
-          },
-          body: JSON.stringify({
-            ...(accessToken && { access_token: accessToken }),
-            userId: currentUser.id,
-            companyId: profileData.company_id,
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+            },
+            body: JSON.stringify({
+              ...(accessToken && { access_token: accessToken }),
+              userId: currentUser.id,
+              companyId: profileData.company_id,
               roleName: currentRoleName,
-          }),
-        });
+            }),
+          });
         } catch (networkError) {
           console.error('Network error fetching work orders:', networkError);
           if (isMounted) {
@@ -259,7 +259,7 @@ export default function WorkOrdersListPage() {
           result = await response.json();
         } catch (parseError) {
           console.error('Error parsing response:', parseError);
-        if (isMounted) {
+          if (isMounted) {
             setWorkOrders([]);
             alert('Error parsing server response. Please try again.');
           }
@@ -271,9 +271,14 @@ export default function WorkOrdersListPage() {
           setAllWorkOrders(orders);
           setWorkOrders(orders);
         }
-      } catch (error: any) {
-        console.error('Error in fetchData:', error);
-        alert(`An error occurred: ${error.message}`);
+      } catch (error: unknown) {
+        if (error instanceof Error) {
+          console.error('Error in fetchData:', error.message);
+          alert(`An error occurred: ${error.message}`);
+        } else {
+          console.error('Unknown error in fetchData:', error);
+          alert('An error occurred. Please try again.');
+        }
       } finally {
         if (isMounted) {
           setLoading(false);
@@ -340,11 +345,11 @@ export default function WorkOrdersListPage() {
     if (filterCompany) params.set('company', filterCompany);
     if (filterSalesExecutive) params.set('salesExecutive', filterSalesExecutive);
     if (filterPlantCapacity) params.set('plantCapacity', filterPlantCapacity);
-    
-    const newUrl = params.toString() 
+
+    const newUrl = params.toString()
       ? `${window.location.pathname}?${params.toString()}`
       : window.location.pathname;
-    
+
     // Update URL without page reload
     window.history.replaceState({}, '', newUrl);
   }, [searchQuery, filterCompany, filterSalesExecutive, filterPlantCapacity]);
@@ -409,18 +414,23 @@ export default function WorkOrdersListPage() {
   };
 
   const fetchPayments = async (workOrderId: string) => {
-    if (!profile?.company_id) return;
+    if (!profile?.company_id || !user || !roleName) return;
 
     setPaymentsLoading(true);
     try {
+      const accessToken = getAccessToken();
       const response = await fetch('/api/payments/work-order', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
         },
         body: JSON.stringify({
+          ...(accessToken && { access_token: accessToken }),
           work_order_id: workOrderId,
           company_id: profile.company_id,
+          user_id: user.id,
+          roleName: roleName,
         }),
       });
 
@@ -488,7 +498,7 @@ export default function WorkOrdersListPage() {
     }
 
     // Prepare payment data based on selected payment type
-    const paymentData: any = {
+    const paymentData: Record<string, string | number | null> = {
       work_order_id: selectedWorkOrder.id,
       amount: paymentFormData.amount,
       transaction_date: paymentFormData.transaction_date,
@@ -544,10 +554,20 @@ export default function WorkOrdersListPage() {
         additional_payment: '',
       });
       setPaymentType('');
-      
+
       // Refresh payments
       await fetchPayments(selectedWorkOrder.id);
-      
+
+      // Auto-generate receipt PDF for the newly created payment
+      if (result.payment?.id) {
+        try {
+          await handleGenerateReceipt(result.payment.id);
+        } catch (receiptError) {
+          console.error('Error auto-generating receipt:', receiptError);
+          // Don't fail the entire operation if receipt generation fails
+        }
+      }
+
       // Refresh work orders list to update status
       if (user && profile && roleName) {
         const accessToken = getAccessToken();
@@ -570,7 +590,7 @@ export default function WorkOrdersListPage() {
           const orders = refreshResult.workOrders || [];
           setAllWorkOrders(orders);
           setWorkOrders(orders);
-          
+
           // Update selected work order if it's still open
           const updatedOrder = orders.find((o: WorkOrder) => o.id === selectedWorkOrder.id);
           if (updatedOrder) {
@@ -578,9 +598,14 @@ export default function WorkOrdersListPage() {
           }
         }
       }
-    } catch (error: any) {
-      console.error('Error adding payment:', error);
-      alert(`Error: ${error.message}`);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error('Error adding payment:', error.message);
+        alert(`Error: ${error.message}`);
+      } else {
+        console.error('Unknown error adding payment:', error);
+        alert('Error: Something went wrong');
+      }
     } finally {
       setPaymentFormLoading(false);
     }
@@ -612,14 +637,19 @@ export default function WorkOrdersListPage() {
       }
 
       alert('Receipt generated successfully!');
-      
+
       // Refresh payments to get updated receipt info
       if (selectedWorkOrder) {
         await fetchPayments(selectedWorkOrder.id);
       }
-    } catch (error: any) {
-      console.error('Error generating receipt:', error);
-      alert(`Error: ${error.message}`);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error('Error generating receipt:', error.message);
+        alert(`Error: ${error.message}`);
+      } else {
+        console.error('Unknown error generating receipt:', error);
+        alert('Error: Something went wrong');
+      }
     } finally {
       setGeneratingReceipt(null);
     }
@@ -631,7 +661,7 @@ export default function WorkOrdersListPage() {
     try {
       // Extract file path from URL (handles both full URLs and paths)
       const filePath = extractFilePathFromUrl(pdfUrl);
-      
+
       if (!filePath) {
         return null;
       }
@@ -647,8 +677,12 @@ export default function WorkOrdersListPage() {
       }
 
       return data.signedUrl;
-    } catch (error: any) {
-      console.error('Error generating signed URL:', error);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error('Error generating signed URL:', error.message);
+      } else {
+        console.error('Unknown error generating signed URL:', error);
+      }
       return null;
     }
   };
@@ -681,13 +715,22 @@ export default function WorkOrdersListPage() {
       return;
     }
 
-    // Trigger download only (no new tab)
-    const link = document.createElement('a');
-    link.href = signedUrl;
-    link.download = `${receiptNumber || 'receipt'}.pdf`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // Fetch the PDF and trigger download
+    try {
+      const response = await fetch(signedUrl);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${receiptNumber || 'receipt'}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading receipt:', error);
+      alert('Failed to download receipt. Please try again.');
+    }
   };
 
   const handleUpdatePayment = async (e: React.FormEvent) => {
@@ -724,12 +767,12 @@ export default function WorkOrdersListPage() {
       alert('Payment updated successfully!');
       setIsEditPaymentModalOpen(false);
       setEditingPayment(null);
-      
+
       // Refresh payments
       if (selectedWorkOrder) {
         await fetchPayments(selectedWorkOrder.id);
       }
-      
+
       // Refresh work orders list
       if (user && profile && roleName) {
         const accessToken = getAccessToken();
@@ -752,7 +795,7 @@ export default function WorkOrdersListPage() {
           const orders = refreshResult.workOrders || [];
           setAllWorkOrders(orders);
           setWorkOrders(orders);
-          
+
           if (selectedWorkOrder) {
             const updatedOrder = orders.find((o: WorkOrder) => o.id === selectedWorkOrder.id);
             if (updatedOrder) {
@@ -761,9 +804,14 @@ export default function WorkOrdersListPage() {
           }
         }
       }
-    } catch (error: any) {
-      console.error('Error updating payment:', error);
-      alert(`Error: ${error.message}`);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error('Error updating payment:', error.message);
+        alert(`Error: ${error.message}`);
+      } else {
+        console.error('Unknown error updating payment:', error);
+        alert('Error: Something went wrong');
+      }
     } finally {
       setPaymentFormLoading(false);
     }
@@ -785,12 +833,12 @@ export default function WorkOrdersListPage() {
    */
   const extractFilePathFromUrl = (url: string | null): string | null => {
     if (!url) return null;
-    
+
     // If it's already a path (doesn't start with http), return as-is
     if (!url.startsWith('http')) {
       return url;
     }
-    
+
     try {
       const urlObj = new URL(url);
       // Extract path after /object/public/work-order-docs/
@@ -854,22 +902,22 @@ export default function WorkOrdersListPage() {
   // Check if user can edit a work order
   const canEdit = (order: WorkOrder): boolean => {
     if (!user || !roleName) return false;
-    
-    // Inventory has read-only access
-    if (roleName === 'Inventory') {
+
+    // Inventory and Accounts have read-only access
+    if (roleName === 'Inventory' || roleName === 'Accounts') {
       return false;
     }
-    
+
     // Admin and Super Admin can edit any work order in their company
     if (roleName === 'Admin' || roleName === 'Super Admin') {
       return true;
     }
-    
+
     // Sales and Sales Lead can only edit their own work orders
     if (roleName === 'Sales' || roleName === 'salesLead') {
       return order.sales_executive_id === user.id;
     }
-    
+
     return false;
   };
 
@@ -946,9 +994,14 @@ export default function WorkOrdersListPage() {
           }
         }
       }
-    } catch (error: any) {
-      console.error('Error marking as dispatched:', error);
-      alert(`Error: ${error.message}`);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error('Error marking as dispatched:', error.message);
+        alert(`Error: ${error.message}`);
+      } else {
+        console.error('Unknown error marking as dispatched:', error);
+        alert('Error: Something went wrong');
+      }
     } finally {
       setMarkingDispatched(false);
     }
@@ -957,12 +1010,12 @@ export default function WorkOrdersListPage() {
   // Check if user can delete a work order (only Admin and Super Admin)
   const canDelete = (order: WorkOrder): boolean => {
     if (!user || !roleName) return false;
-    
-    // Inventory has read-only access
-    if (roleName === 'Inventory') {
+
+    // Inventory and Accounts have read-only access
+    if (roleName === 'Inventory' || roleName === 'Accounts') {
       return false;
     }
-    
+
     // Only Admin and Super Admin can delete work orders
     return roleName === 'Admin' || roleName === 'Super Admin';
   };
@@ -982,10 +1035,10 @@ export default function WorkOrdersListPage() {
       structure_height: order.structure_height || '',
       roof_type: order.roof_type || '',
       // Extract numeric value from plant_capacity (remove "kW" if present)
-      plant_capacity: order.plant_capacity 
-        ? (order.plant_capacity.endsWith('kW') 
-            ? order.plant_capacity.replace('kW', '') 
-            : order.plant_capacity)
+      plant_capacity: order.plant_capacity
+        ? (order.plant_capacity.endsWith('kW')
+          ? order.plant_capacity.replace('kW', '')
+          : order.plant_capacity)
         : '',
       order_amount: order.order_amount.toString(),
       aadhaar_url: order.aadhaar_url || '',
@@ -1096,9 +1149,10 @@ export default function WorkOrdersListPage() {
       if (signedData?.signedUrl) {
         setEditSignedUrls(prev => ({ ...prev, [docType]: signedData.signedUrl }));
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Upload failed';
       console.error(`Upload error for ${docType}:`, error);
-      setEditDocumentErrors(prev => ({ ...prev, [docType]: error.message || 'Upload failed' }));
+      setEditDocumentErrors(prev => ({ ...prev, [docType]: errorMessage }));
     } finally {
       setEditDocumentUploading(prev => ({ ...prev, [docType]: false }));
       event.target.value = '';
@@ -1145,10 +1199,10 @@ export default function WorkOrdersListPage() {
     setEditLoading(true);
     try {
       // Format plant_capacity: if numeric, append "kW", otherwise store as-is
-      const formattedPlantCapacity = editFormData.plant_capacity 
-        ? (editFormData.plant_capacity.trim() && !isNaN(parseFloat(editFormData.plant_capacity)) 
-            ? `${editFormData.plant_capacity}kW` 
-            : editFormData.plant_capacity)
+      const formattedPlantCapacity = editFormData.plant_capacity
+        ? (editFormData.plant_capacity.trim() && !isNaN(parseFloat(editFormData.plant_capacity))
+          ? `${editFormData.plant_capacity}kW`
+          : editFormData.plant_capacity)
         : null;
 
       const response = await fetch('/api/work-orders/update', {
@@ -1200,9 +1254,14 @@ export default function WorkOrdersListPage() {
       if (isModalOpen) {
         closeDetailModal();
       }
-    } catch (error: any) {
-      console.error('Error updating work order:', error);
-      alert(`Error: ${error.message}`);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error('Error updating work order:', error.message);
+        alert(`Error: ${error.message}`);
+      } else {
+        console.error('Unknown error updating work order:', error);
+        alert('Error: Something went wrong');
+      }
     } finally {
       setEditLoading(false);
     }
@@ -1259,9 +1318,14 @@ export default function WorkOrdersListPage() {
       if (isModalOpen && selectedWorkOrder?.id === deletingWorkOrder.id) {
         closeDetailModal();
       }
-    } catch (error: any) {
-      console.error('Error deleting work order:', error);
-      alert(`Error: ${error.message}`);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error('Error deleting work order:', error.message);
+        alert(`Error: ${error.message}`);
+      } else {
+        console.error('Unknown error deleting work order:', error);
+        alert('Error: Something went wrong');
+      }
     } finally {
       setDeleteLoading(false);
     }
@@ -1304,15 +1368,15 @@ export default function WorkOrdersListPage() {
       }
 
       // Update local state
-      const updatedOrders = workOrders.map(order => 
-        order.id === dispatchingWorkOrder.id 
+      const updatedOrders = workOrders.map(order =>
+        order.id === dispatchingWorkOrder.id
           ? { ...order, work_order_status: 'Dispatched' }
           : order
       );
       setWorkOrders(updatedOrders);
-      
-      const updatedAllOrders = allWorkOrders.map(order => 
-        order.id === dispatchingWorkOrder.id 
+
+      const updatedAllOrders = allWorkOrders.map(order =>
+        order.id === dispatchingWorkOrder.id
           ? { ...order, work_order_status: 'Dispatched' }
           : order
       );
@@ -1320,7 +1384,7 @@ export default function WorkOrdersListPage() {
 
       alert('Work order marked as dispatched successfully! WhatsApp messages have been sent.');
       closeDispatchModal();
-      
+
       // Close detail modal if open and update it
       if (isModalOpen && selectedWorkOrder?.id === dispatchingWorkOrder.id) {
         const updatedSelected = updatedOrders.find(o => o.id === dispatchingWorkOrder.id);
@@ -1328,9 +1392,14 @@ export default function WorkOrdersListPage() {
           setSelectedWorkOrder(updatedSelected);
         }
       }
-    } catch (error: any) {
-      console.error('Error marking as dispatched:', error);
-      alert(`Error: ${error.message}`);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error('Error marking as dispatched:', error.message);
+        alert(`Error: ${error.message}`);
+      } else {
+        console.error('Unknown error marking as dispatched:', error);
+        alert('Error: Something went wrong');
+      }
     } finally {
       setDispatchLoading(false);
     }
@@ -1345,7 +1414,7 @@ export default function WorkOrdersListPage() {
       <PageHeader
         title="Work Orders"
         rightAction={
-          roleName !== 'Inventory' ? (
+          roleName !== 'Inventory' && roleName !== 'Accounts' ? (
             <Button
               asLink
               href="/dashboard/work-orders"
@@ -1362,9 +1431,9 @@ export default function WorkOrdersListPage() {
         <div className="mb-8">
           <div className="flex items-center justify-between">
             <div>
-          <h2 className="text-2xl font-bold text-foreground">Work Orders</h2>
-          <p className="mt-2 text-foreground opacity-70">
-            View and manage all work orders
+              <h2 className="text-2xl font-bold text-foreground">Work Orders</h2>
+              <p className="mt-2 text-foreground opacity-70">
+                View and manage all work orders
                 {hasActiveFilters && (
                   <span className="ml-2 text-sm">
                     ({workOrders.length} of {allWorkOrders.length} shown)
@@ -1455,7 +1524,7 @@ export default function WorkOrdersListPage() {
         {workOrders.length === 0 ? (
           <div className="rounded-lg border border-zinc-200 bg-white p-12 text-center">
             <p className="text-foreground opacity-70">No work orders found.</p>
-            {roleName !== 'Inventory' && (
+            {roleName !== 'Inventory' && roleName !== 'Accounts' && (
               <Link
                 href="/dashboard/work-orders"
                 className="mt-4 inline-block rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-hover transition-colors"
@@ -1614,13 +1683,12 @@ export default function WorkOrdersListPage() {
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm">
                         {order.work_order_status ? (
-                          <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                            order.work_order_status === 'To Be Dispatched' 
-                              ? 'bg-green-100 text-green-800' 
-                              : order.work_order_status === 'Dispatched'
+                          <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${order.work_order_status === 'To Be Dispatched'
+                            ? 'bg-green-100 text-green-800'
+                            : order.work_order_status === 'Dispatched'
                               ? 'bg-blue-100 text-blue-800'
                               : 'bg-gray-100 text-gray-800'
-                          }`}>
+                            }`}>
                             {order.work_order_status}
                           </span>
                         ) : (
@@ -1657,10 +1725,10 @@ export default function WorkOrdersListPage() {
                         {order.roof_type || 'N/A'}
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
-                        {order.plant_capacity 
-                          ? (order.plant_capacity.endsWith('kW') 
-                              ? order.plant_capacity 
-                              : `${order.plant_capacity}kW`)
+                        {order.plant_capacity
+                          ? (order.plant_capacity.endsWith('kW')
+                            ? order.plant_capacity
+                            : `${order.plant_capacity}kW`)
                           : 'N/A'}
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-foreground">
@@ -1955,21 +2023,21 @@ export default function WorkOrdersListPage() {
               <div className="mt-8 border-t border-zinc-200 pt-6">
                 <div className="mb-4 flex items-center justify-between">
                   <h4 className="text-lg font-semibold text-[#1E1E1E]">Payments</h4>
-                  {roleName === 'Admin' || roleName === 'Super Admin' ? (
+                  {roleName === 'Admin' || roleName === 'Super Admin' || roleName === 'Accounts' ? (
                     <button
                       onClick={() => {
-      setPaymentFormData({
-        amount: '',
-        transaction_date: new Date().toISOString().split('T')[0],
-        payment_method: '',
-        status: 'completed',
-        first_payment: '',
-        second_payment: '',
-        final_payment: '',
-        additional_payment: '',
-      });
-      setPaymentType('');
-      setIsAddPaymentModalOpen(true);
+                        setPaymentFormData({
+                          amount: '',
+                          transaction_date: new Date().toISOString().split('T')[0],
+                          payment_method: '',
+                          status: 'completed',
+                          first_payment: '',
+                          second_payment: '',
+                          final_payment: '',
+                          additional_payment: '',
+                        });
+                        setPaymentType('');
+                        setIsAddPaymentModalOpen(true);
                       }}
                       className="rounded-md bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700"
                     >
@@ -2003,7 +2071,7 @@ export default function WorkOrdersListPage() {
                           <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[#1E1E1E] opacity-70">
                             Receipt No.
                           </th>
-                          {(roleName === 'Admin' || roleName === 'Super Admin') && (
+                          {(roleName === 'Admin' || roleName === 'Super Admin' || roleName === 'Accounts') && (
                             <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[#1E1E1E] opacity-70">
                               Actions
                             </th>
@@ -2028,42 +2096,44 @@ export default function WorkOrdersListPage() {
                             <td className="whitespace-nowrap px-4 py-3 text-sm text-[#1E1E1E] opacity-70">
                               {payment.receipt_number || '-'}
                             </td>
-                            {(roleName === 'Admin' || roleName === 'Super Admin') && (
+                            {(roleName === 'Admin' || roleName === 'Super Admin' || roleName === 'Accounts') && (
                               <td className="whitespace-nowrap px-4 py-3 text-sm">
                                 <div className="flex items-center gap-2">
-                                  <button
-                                    onClick={() => {
-                                      setEditingPayment(payment);
-                                      setPaymentFormData({
-                                        amount: payment.amount.toString(),
-                                        transaction_date: payment.transaction_date,
-                                        payment_method: payment.payment_method || '',
-                                        status: payment.status,
-                                        first_payment: payment.first_payment?.toString() || '',
-                                        second_payment: payment.second_payment?.toString() || '',
-                                        final_payment: payment.final_payment?.toString() || '',
-                                        additional_payment: payment.additional_payment?.toString() || '',
-                                      });
-                                      setIsEditPaymentModalOpen(true);
-                                    }}
-                                    className="text-blue-600 hover:text-blue-700 transition-colors duration-150"
-                                    title="Edit Payment"
-                                  >
-                                    <svg
-                                      xmlns="http://www.w3.org/2000/svg"
-                                      className="h-5 w-5"
-                                      fill="none"
-                                      viewBox="0 0 24 24"
-                                      stroke="currentColor"
-                                      strokeWidth={2}
+                                  {(roleName === 'Admin' || roleName === 'Super Admin') && (
+                                    <button
+                                      onClick={() => {
+                                        setEditingPayment(payment);
+                                        setPaymentFormData({
+                                          amount: payment.amount.toString(),
+                                          transaction_date: payment.transaction_date,
+                                          payment_method: payment.payment_method || '',
+                                          status: payment.status,
+                                          first_payment: payment.first_payment?.toString() || '',
+                                          second_payment: payment.second_payment?.toString() || '',
+                                          final_payment: payment.final_payment?.toString() || '',
+                                          additional_payment: payment.additional_payment?.toString() || '',
+                                        });
+                                        setIsEditPaymentModalOpen(true);
+                                      }}
+                                      className="text-blue-600 hover:text-blue-700 transition-colors duration-150"
+                                      title="Edit Payment"
                                     >
-                                      <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                                      />
-                                    </svg>
-                                  </button>
+                                      <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        className="h-5 w-5"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                        strokeWidth={2}
+                                      >
+                                        <path
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                        />
+                                      </svg>
+                                    </button>
+                                  )}
                                   {!payment.pdf_url ? (
                                     <button
                                       onClick={() => handleGenerateReceipt(payment.id)}
@@ -2605,7 +2675,7 @@ export default function WorkOrdersListPage() {
                   </svg>
                 </button>
               </div>
-              
+
               {/* Modal Body */}
               <div className="p-8">
                 <form onSubmit={handleAddPayment} className="space-y-6">
@@ -2800,7 +2870,7 @@ export default function WorkOrdersListPage() {
                   </svg>
                 </button>
               </div>
-              
+
               {/* Modal Body */}
               <div className="p-8">
                 <form onSubmit={handleUpdatePayment} className="space-y-6">

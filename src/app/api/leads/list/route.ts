@@ -249,11 +249,11 @@ export async function POST(request: NextRequest) {
         totalPages: requestedLimit >= 10000 ? 1 : Math.ceil(actualCount / pageSize),
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('API Error fetching leads:', error);
     
     // Handle authentication errors
-    if (error.message?.includes('Unauthorized')) {
+    if (error instanceof Error && error.message?.includes('Unauthorized')) {
       return NextResponse.json(
         { error: error.message },
         { status: 401 }
@@ -261,7 +261,7 @@ export async function POST(request: NextRequest) {
     }
     
     return NextResponse.json(
-      { error: error.message || 'An error occurred' },
+      { error: error instanceof Error ? error.message : 'An error occurred' },
       { status: 500 }
     );
   }

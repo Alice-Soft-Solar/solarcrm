@@ -221,9 +221,9 @@ export default function NewLeadPage() {
         // Sales role: direct redirect to view leads
       router.push('/dashboard/leads');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Unexpected error creating lead:', err);
-      alert(err.message || 'Unexpected error creating lead');
+      alert(err instanceof Error ? err.message : 'Unexpected error creating lead');
     } finally {
       setSaving(false);
     }

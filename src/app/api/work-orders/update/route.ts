@@ -97,10 +97,10 @@ export async function PUT(request: NextRequest) {
       success: true,
       workOrder: data,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('API Error updating work order:', error);
     return NextResponse.json(
-      { error: error.message || 'An error occurred' },
+      { error: error instanceof Error ? error.message : 'An error occurred' },
       { status: 500 }
     );
   }

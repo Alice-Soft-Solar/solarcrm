@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import React from 'react';
 import { pdf, DocumentProps } from '@react-pdf/renderer';
-import ReceiptTemplate from '@/components/ReceiptTemplate';
+import { ReceiptTemplate } from '@/components/ReceiptTemplate';
 
 export async function POST(request: NextRequest) {
   try {
@@ -62,57 +62,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Fetch company details with super_base_id and logo
-    // Note: companies table doesn't have 'address' column - removed from select
+    // Fetch company details with all required fields for receipt
     const { data: company, error: companyError } = await supabase
       .from('companies')
-      .select('name, phone, super_base_id, logo_url')
+      .select('name, company_address, company_phone1, company_phone2, company_email, gst_no')
       .eq('id', company_id)
       .single();
 
-    if (companyError) {
+    if (companyError || !company) {
       console.error('Error fetching company:', companyError);
-    }
-
-    // Fetch super base company details if super_base_id exists
-    let superBaseCompany = null;
-    let logoUrl: string | undefined = company?.logo_url || undefined;
-    
-    if (company?.super_base_id) {
-      const { data: superBase, error: superBaseError } = await supabase
-        .from('companies')
-        .select('name, logo_url')
-        .eq('id', company.super_base_id)
-        .single();
-
-      if (!superBaseError && superBase) {
-        superBaseCompany = superBase;
-        // Use super base company logo if available, otherwise use company logo
-        logoUrl = superBase.logo_url || company?.logo_url || undefined;
-      }
-    }
-
-    // Generate signed URL if logo is stored in Supabase storage (path format)
-    // Assumes logo_url might be a storage path like "company-id/logo.png"
-    if (logoUrl && !logoUrl.startsWith('http://') && !logoUrl.startsWith('https://')) {
-      try {
-        // Try common storage buckets - adjust bucket name if different
-        const possibleBuckets = ['company-logos', 'logos', 'work-order-docs'];
-        for (const bucket of possibleBuckets) {
-          const { data: signedData, error: signedError } = await supabase.storage
-            .from(bucket)
-            .createSignedUrl(logoUrl, 3600); // 1 hour expiry
-          
-          if (!signedError && signedData?.signedUrl) {
-            logoUrl = signedData.signedUrl;
-            break;
-          }
-        }
-      } catch (error) {
-        console.error('Error generating signed URL for logo:', error);
-        // Continue without logo if signed URL generation fails
-        logoUrl = undefined;
-      }
+      return NextResponse.json(
+        { error: 'Company not found' },
+        { status: 404 }
+      );
     }
 
     // Get all payments for this work order to calculate totals
@@ -173,29 +135,31 @@ export async function POST(request: NextRequest) {
       receiptNumber = `${prefix}${sequence.toString().padStart(4, '0')}`;
     }
 
-    // Prepare receipt data with proper company mapping
-    // Use super base company name if available, otherwise use company name
-    const displayCompanyName = superBaseCompany?.name || company?.name || 'Company Name';
-    
+    // Prepare receipt data with company details from database
     const receiptData = {
       receiptNumber,
       receiptDate: payment.receipt_generated_at || payment.created_at || new Date().toISOString(),
-      companyName: displayCompanyName,
-      companyAddress: '', // companies table doesn't have address column
-      companyPhone: company?.phone || '',
-      companyLogoUrl: logoUrl,
-      customerName: workOrder.customer_name,
-      customerAddress: workOrder.customer_address,
-      customerPhone: workOrder.customer_phone,
-      workOrderNumber: workOrder.work_order_number,
-      orderAmount,
-      paymentType,
-      paymentAmount: parseFloat(payment.amount),
-      paymentMethod: payment.payment_method || 'N/A',
-      transactionDate: payment.transaction_date,
-      totalPaid,
-      pendingAmount,
+      companyName: company.name || 'Company Name',
+      companyAddress: company.company_address || '',
+      companyPhone1: company.company_phone1 || '',
+      companyPhone2: company.company_phone2 || '',
+      companyEmail: company.company_email || '',
+      gstNo: company.gst_no || '',
+      customerName: workOrder.customer_name || 'N/A',
+      amount: parseFloat(payment.amount) || 0,
+      paymentMethod: payment.payment_method || 'bank_transfer',
+      bankName: payment.bank_name || '',
+      chequeNo: payment.cheque_no || '',
+      status: payment.status || 'Completed',
+      orderValue: orderAmount ?? 0,
+      totalReceived: totalPaid ?? 0,
+      balanceAmount: pendingAmount ?? 0,
     };
+
+    // Guard: Ensure data is valid before PDF generation
+    if (!receiptData || !receiptData.receiptNumber) {
+      throw new Error('Receipt data missing');
+    }
 
     // Generate PDF
     const ReceiptElement = React.createElement(ReceiptTemplate, { data: receiptData });

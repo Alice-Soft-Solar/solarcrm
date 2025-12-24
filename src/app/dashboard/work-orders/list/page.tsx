@@ -13,7 +13,10 @@ interface WorkOrder {
   work_order_number: string;
   customer_name: string;
   customer_address: string;
+  customer_email: string | null;
   customer_phone: string;
+  power_bill: number | null;
+  power_units: number | null;
   site_details: string | null;
   structure_height: string | null;
   roof_type: string | null;
@@ -89,7 +92,10 @@ export default function WorkOrdersListPage() {
     work_order_number: '',
     customer_name: '',
     customer_address: '',
+    customer_email: '',
     customer_phone: '',
+    power_bill: '',
+    power_units: '',
     site_details: '',
     structure_height: '',
     roof_type: '',
@@ -146,6 +152,9 @@ export default function WorkOrdersListPage() {
   const [paymentFormLoading, setPaymentFormLoading] = useState(false);
   const [generatingReceipt, setGeneratingReceipt] = useState<string | null>(null);
   const [markingDispatched, setMarkingDispatched] = useState(false);
+
+  // Ledger PDF generation state
+  const [generatingLedger, setGeneratingLedger] = useState(false);
 
   // Dispatch confirmation state
   const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
@@ -1030,7 +1039,10 @@ export default function WorkOrdersListPage() {
       work_order_number: order.work_order_number,
       customer_name: order.customer_name,
       customer_address: order.customer_address,
+      customer_email: order.customer_email || '',
       customer_phone: order.customer_phone,
+      power_bill: order.power_bill != null ? order.power_bill.toString() : '',
+      power_units: order.power_units != null ? order.power_units.toString() : '',
       site_details: order.site_details || '',
       structure_height: order.structure_height || '',
       roof_type: order.roof_type || '',
@@ -1166,7 +1178,10 @@ export default function WorkOrdersListPage() {
       work_order_number: '',
       customer_name: '',
       customer_address: '',
+      customer_email: '',
       customer_phone: '',
+      power_bill: '',
+      power_units: '',
       site_details: '',
       structure_height: '',
       roof_type: '',
@@ -1344,6 +1359,58 @@ export default function WorkOrdersListPage() {
     setDispatchingWorkOrder(null);
   };
 
+  // Handler for generating ledger PDF (Admin only)
+  const handleGenerateLedger = async () => {
+    if (!profile?.company_id || !user) {
+      alert('Missing required information. Please refresh the page.');
+      return;
+    }
+
+    setGeneratingLedger(true);
+    try {
+      const accessToken = getAccessToken();
+      const response = await fetch('/api/ledger/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+        },
+        body: JSON.stringify({
+          ...(accessToken && { access_token: accessToken }),
+          company_id: profile.company_id,
+          user_id: user.id,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to generate ledger');
+      }
+
+      // Download PDF
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const today = new Date().toISOString().split('T')[0];
+      link.download = `ledger-${today}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error('Error generating ledger:', error.message);
+        alert(`Error: ${error.message}`);
+      } else {
+        console.error('Unknown error generating ledger:', error);
+        alert('Error: Failed to generate ledger PDF');
+      }
+    } finally {
+      setGeneratingLedger(false);
+    }
+  };
+
   const handleConfirmDispatch = async () => {
     if (!dispatchingWorkOrder || !user || !profile) return;
 
@@ -1414,16 +1481,29 @@ export default function WorkOrdersListPage() {
       <PageHeader
         title="Work Orders"
         rightAction={
-          roleName !== 'Inventory' && roleName !== 'Accounts' ? (
-            <Button
-              asLink
-              href="/dashboard/work-orders"
-              variant="primary"
-              size="sm"
-            >
-              Create New
-            </Button>
-          ) : null
+          <>
+            {(roleName === 'Admin' || roleName === 'Super Admin') && (
+              <Button
+                onClick={handleGenerateLedger}
+                disabled={generatingLedger}
+                variant="secondary"
+                size="sm"
+                className="mr-2"
+              >
+                {generatingLedger ? 'Generating...' : 'Generate Ledger PDF'}
+              </Button>
+            )}
+            {roleName !== 'Inventory' && roleName !== 'Accounts' ? (
+              <Button
+                asLink
+                href="/dashboard/work-orders"
+                variant="primary"
+                size="sm"
+              >
+                Create New
+              </Button>
+            ) : null}
+          </>
         }
       />
 
@@ -1791,8 +1871,20 @@ export default function WorkOrdersListPage() {
                         <p className="text-base text-[#1E1E1E] font-medium">{selectedWorkOrder.customer_address}</p>
                       </div>
                       <div>
+                        <label className="block text-sm font-semibold text-[#1E1E1E] opacity-80 mb-1">Customer Email</label>
+                        <p className="text-base text-[#1E1E1E] font-medium">{selectedWorkOrder.customer_email || 'N/A'}</p>
+                      </div>
+                      <div>
                         <label className="block text-sm font-semibold text-[#1E1E1E] opacity-80 mb-1">Customer Phone</label>
                         <p className="text-base text-[#1E1E1E] font-medium">{selectedWorkOrder.customer_phone}</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-[#1E1E1E] opacity-80 mb-1">Power Bill</label>
+                        <p className="text-base text-[#1E1E1E] font-medium">{selectedWorkOrder.power_bill != null ? `₹${selectedWorkOrder.power_bill.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'N/A'}</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-[#1E1E1E] opacity-80 mb-1">Power Units</label>
+                        <p className="text-base text-[#1E1E1E] font-medium">{selectedWorkOrder.power_units != null ? `${selectedWorkOrder.power_units} kWh` : 'N/A'}</p>
                       </div>
                       {(roleName !== 'Admin' && roleName !== 'Super Admin') && (
                         <div>
@@ -2361,6 +2453,19 @@ export default function WorkOrdersListPage() {
 
                   <div>
                     <label className="block text-sm font-medium text-[#1E1E1E]">
+                      Customer Email
+                    </label>
+                    <input
+                      type="email"
+                      value={editFormData.customer_email}
+                      onChange={(e) => setEditFormData({ ...editFormData, customer_email: e.target.value })}
+                      className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-[#1E1E1E]"
+                      placeholder="customer@example.com"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-[#1E1E1E]">
                       Customer Phone <span className="text-red-500">*</span>
                     </label>
                     <input
@@ -2369,6 +2474,34 @@ export default function WorkOrdersListPage() {
                       value={editFormData.customer_phone}
                       onChange={(e) => setEditFormData({ ...editFormData, customer_phone: e.target.value })}
                       className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-[#1E1E1E]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-[#1E1E1E]">
+                      Power Bill
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={editFormData.power_bill}
+                      onChange={(e) => setEditFormData({ ...editFormData, power_bill: e.target.value })}
+                      className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-[#1E1E1E]"
+                      placeholder="320.50"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-[#1E1E1E]">
+                      Power Units
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={editFormData.power_units}
+                      onChange={(e) => setEditFormData({ ...editFormData, power_units: e.target.value })}
+                      className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-[#1E1E1E]"
+                      placeholder="280"
                     />
                   </div>
 

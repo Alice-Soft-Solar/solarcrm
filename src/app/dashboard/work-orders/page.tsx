@@ -33,7 +33,10 @@ export default function WorkOrdersPage() {
     work_order_number: '',
     customer_name: '',
     customer_address: '',
+    customer_email: '',
     customer_phone: '',
+    power_bill: '',
+    power_units: '',
     site_details: '',
     structure_height: '',
     roof_type: '',
@@ -421,7 +424,10 @@ export default function WorkOrdersPage() {
           work_order_number: formData.work_order_number,
           customer_name: formData.customer_name,
           customer_address: formData.customer_address,
+          customer_email: formData.customer_email || null,
           customer_phone: formData.customer_phone,
+          power_bill: formData.power_bill ? parseFloat(formData.power_bill) : null,
+          power_units: formData.power_units ? parseFloat(formData.power_units) : null,
           site_details: formData.site_details || null,
           structure_height: formData.structure_height || null,
           roof_type: formData.roof_type || null,
@@ -562,6 +568,19 @@ export default function WorkOrdersPage() {
 
             <div>
               <label className="block text-sm font-medium text-foreground">
+                Customer Email
+              </label>
+              <input
+                type="email"
+                value={formData.customer_email}
+                onChange={(e) => setFormData({ ...formData, customer_email: e.target.value })}
+                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
+                placeholder="customer@example.com"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-foreground">
                 Customer Phone <span className="text-red-500">*</span>
               </label>
               <input
@@ -585,6 +604,34 @@ export default function WorkOrdersPage() {
               {errors.customer_phone && (
                 <p className="mt-1 text-xs text-red-600">{errors.customer_phone}</p>
               )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-foreground">
+                Power Bill
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.power_bill}
+                onChange={(e) => setFormData({ ...formData, power_bill: e.target.value })}
+                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
+                placeholder="320.50"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-foreground">
+                Power Units
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.power_units}
+                onChange={(e) => setFormData({ ...formData, power_units: e.target.value })}
+                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
+                placeholder="280"
+              />
             </div>
 
             <div>

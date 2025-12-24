@@ -3,6 +3,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 import { useState, useMemo } from 'react';
+import Link from 'next/link';
 import { Button, Input, Card } from '@/components/ui';
 
 export default function LoginPage() {
@@ -142,7 +143,7 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <div>
+          <div className="space-y-4">
             <Button
               type="submit"
               variant="primary"
@@ -153,6 +154,15 @@ export default function LoginPage() {
             >
               Sign in
             </Button>
+
+            <div className="text-center">
+              <Link
+                href="/forgot-password"
+                className="text-sm font-medium text-accent hover:text-accent-hover transition-colors"
+              >
+                Forgot password?
+              </Link>
+            </div>
           </div>
         </form>
       </Card>

@@ -6,30 +6,31 @@ import { pdf, DocumentProps } from '@react-pdf/renderer';
 import { LedgerTemplate } from '@/components/LedgerTemplate';
 
 /**
- * API Route: Generate Admin Ledger PDF
+ * API Route: Generate Sales Executive Ledger PDF
  * 
- * Purpose: Generate a comprehensive sales ledger PDF for admin users
- * showing work orders and payments grouped by Sales Executive → Customer
+ * Purpose: Generate a sales ledger PDF for a specific sales executive
+ * showing their work orders and payments grouped by Customer
  * 
- * Security: ADMIN ONLY (Admin, Super Admin)
+ * Security: ADMIN, SUPER ADMIN, and SALES roles
+ * - Admin/Super Admin: Can generate ledger for any sales executive (via sales_executive_name param)
+ * - Sales: Can only generate their own ledger (auto-detected from profile)
  * 
  * Data Flow:
- * 1. Fetch all work_orders for company
- * 2. Fetch all payments_data for those work orders
- * 3. Group by sales_executive → customer
- * 4. Calculate sequential balances
- * 5. Generate PDF and stream to client
+ * 1. Authenticate user
+ * 2. Determine target sales executive (from param or user profile)
+ * 3. Fetch work_orders for that sales executive
+ * 4. Fetch payments for those work orders
+ * 5. Group by customer
+ * 6. Calculate sequential balances
+ * 7. Generate PDF and stream to client
  */
 
 /**
  * Helper: Extract town from customer address
- * Example: "OPP. STALL GIRLS HIGHSCHOOL, NAGARAMPALEM, GUNTUR, ANDHRA PRADESH"
- * Returns: "GUNTUR" (second-to-last comma-separated part)
  */
 function extractTown(address: string): string {
   if (!address) return '';
   const parts = address.split(',').map(s => s.trim());
-  // Return second-to-last part (town) or last part if only one comma
   return parts.length > 1 ? parts[parts.length - 2] : parts[0];
 }
 
@@ -61,27 +62,68 @@ function formatDate(dateString: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    // Step 1: Authenticate and verify admin role
+    // Step 1: Authenticate and verify role
     const supabase = await createServerClient(request);
     const { companyId, roleName } = await verifyUserAndGetProfile(supabase, request);
 
-    // Step 2: Check authorization - ADMIN ONLY
+    // Step 2: Check authorization - Admin, Super Admin, or Sales
     const isAdmin = roleName === 'Admin' || roleName === 'Super Admin';
-    if (!isAdmin) {
+    const isSales = roleName === 'Sales';
+    
+    if (!isAdmin && !isSales) {
       return NextResponse.json(
-        { error: 'Unauthorized: Only Admin users can generate ledger reports' },
+        { error: 'Unauthorized: Only Admin and Sales users can generate sales executive ledgers' },
         { status: 403 }
       );
     }
 
-    // Step 3: Create service role client to bypass RLS for data fetching
-    // This is necessary because ledger needs to see all profiles/work orders across the company
+    // Step 3: Parse request body
+    const body = await request.json();
+    let targetSalesExecutiveName: string;
+
+    // Step 4: Determine target sales executive
+    if (isSales) {
+      // For Sales role: Use their own name from profile
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        return NextResponse.json(
+          { error: 'User not found' },
+          { status: 404 }
+        );
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError || !profile || !profile.full_name) {
+        return NextResponse.json(
+          { error: 'Sales executive profile not found' },
+          { status: 404 }
+        );
+      }
+
+      targetSalesExecutiveName = profile.full_name;
+    } else {
+      // For Admin: Use provided sales_executive_name
+      if (!body.sales_executive_name) {
+        return NextResponse.json(
+          { error: 'sales_executive_name is required for Admin users' },
+          { status: 400 }
+        );
+      }
+      targetSalesExecutiveName = body.sales_executive_name;
+    }
+
+    // Step 5: Create service role client to bypass RLS for data fetching
     const adminSupabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // Step 4: Fetch company details using admin client
+    // Step 6: Fetch company details
     const { data: company, error: companyError } = await adminSupabase
       .from('companies')
       .select('name, company_address, company_phone1, company_phone2, company_email, gst_no')
@@ -95,7 +137,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Step 5: Fetch all work orders for this company using admin client
+    // Step 7: Get sales executive ID from name
+    const { data: targetProfile, error: targetProfileError } = await adminSupabase
+      .from('profiles')
+      .select('id, full_name')
+      .eq('company_id', companyId)
+      .eq('full_name', targetSalesExecutiveName)
+      .single();
+
+    if (targetProfileError || !targetProfile) {
+      return NextResponse.json(
+        { error: `Sales executive "${targetSalesExecutiveName}" not found` },
+        { status: 404 }
+      );
+    }
+
+    // Step 8: Fetch work orders for this sales executive only
     const { data: workOrders, error: workOrdersError } = await adminSupabase
       .from('work_orders')
       .select(`
@@ -110,6 +167,7 @@ export async function POST(request: NextRequest) {
         sales_executive_id
       `)
       .eq('company_id', companyId)
+      .eq('sales_executive_id', targetProfile.id)
       .order('created_at', { ascending: true });
 
     if (workOrdersError) {
@@ -121,28 +179,38 @@ export async function POST(request: NextRequest) {
     }
 
     if (!workOrders || workOrders.length === 0) {
-      return NextResponse.json(
-        { error: 'No work orders found for this company' },
-        { status: 404 }
-      );
-    }
+      // Return empty ledger for sales executive with no work orders
+      const ledgerData = {
+        companyName: company.name || 'Company Name',
+        companyAddress: company.company_address || '',
+        companyPhone1: company.company_phone1 || '',
+        companyPhone2: company.company_phone2 || '',
+        companyEmail: company.company_email || '',
+        gstNo: company.gst_no || '',
+        generatedDate: formatDate(new Date().toISOString()),
+        salesExecutives: [{
+          name: targetSalesExecutiveName,
+          customers: [],
+        }],
+      };
 
-    // Step 6: Fetch sales executive names using admin client (bypasses RLS)
-    // This is critical - without service role, RLS filters out other users' profiles
-    const salesExecIds = [...new Set(workOrders.map(wo => wo.sales_executive_id))];
-    const { data: profiles, error: profilesError } = await adminSupabase
-      .from('profiles')
-      .select('id, full_name')
-      .in('id', salesExecIds);
+      // Generate empty PDF
+      const LedgerElement = React.createElement(LedgerTemplate, { data: ledgerData });
+      const pdfDoc = pdf(LedgerElement as React.ReactElement<DocumentProps>);
+      const blob = await pdfDoc.toBlob();
+      const arrayBuffer = await blob.arrayBuffer();
+      const pdfBuffer = Buffer.from(arrayBuffer);
 
-    const salesExecMap: Record<string, string> = {};
-    if (!profilesError && profiles) {
-      profiles.forEach((profile: any) => {
-        salesExecMap[profile.id] = profile.full_name || 'Unknown';
+      return new NextResponse(pdfBuffer, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="ledger-${targetSalesExecutiveName}-${formatDate(new Date().toISOString())}.pdf"`,
+        },
       });
     }
 
-    // Step 7: Fetch all payments for these work orders using admin client
+    // Step 9: Fetch all payments for these work orders
     const workOrderIds = workOrders.map(wo => wo.id);
     const { data: payments, error: paymentsError } = await adminSupabase
       .from('payments_data')
@@ -158,7 +226,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Step 7: Group payments by work_order_id
+    // Step 10: Group payments by work_order_id
     const paymentsByWorkOrder: Record<string, Array<{
       id: string;
       work_order_id: string;
@@ -173,34 +241,20 @@ export async function POST(request: NextRequest) {
       paymentsByWorkOrder[payment.work_order_id].push(payment);
     });
 
-    // Step 8: Build ledger data structure with sequential balance calculation
-    const salesExecutivesMap: Record<string, {
+    // Step 11: Build ledger data structure with customers
+    const customers: Array<{
       name: string;
-      customers: Array<{
-        name: string;
-        town: string;
-        mobile: string;
-        transactions: any[];
-      }>;
-    }> = {};
+      town: string;
+      mobile: string;
+      transactions: any[];
+    }> = [];
 
     workOrders.forEach((workOrder) => {
-      const execId = workOrder.sales_executive_id;
-      const execName = salesExecMap[execId] || 'Unassigned';
-
-      // Initialize sales executive if not exists
-      if (!salesExecutivesMap[execId]) {
-        salesExecutivesMap[execId] = {
-          name: execName,
-          customers: [],
-        };
-      }
-
       // Build customer transactions
       const transactions: any[] = [];
       
       // First transaction: ORDER row
-      const orderBalance = parseFloat(workOrder.order_amount || 0);
+      const orderBalance = parseFloat(String(workOrder.order_amount || 0));
       transactions.push({
         date: formatDate(workOrder.created_at),
         workOrderNo: workOrder.work_order_number || '',
@@ -230,8 +284,8 @@ export async function POST(request: NextRequest) {
         });
       });
 
-      // Add customer to sales executive
-      salesExecutivesMap[execId].customers.push({
+      // Add customer
+      customers.push({
         name: workOrder.customer_name,
         town: extractTown(workOrder.customer_address || ''),
         mobile: workOrder.customer_phone || '',
@@ -239,10 +293,7 @@ export async function POST(request: NextRequest) {
       });
     });
 
-    // Convert map to array
-    const salesExecutives = Object.values(salesExecutivesMap);
-
-    // Step 9: Prepare ledger data
+    // Step 12: Prepare ledger data
     const ledgerData = {
       companyName: company.name || 'Company Name',
       companyAddress: company.company_address || '',
@@ -251,10 +302,13 @@ export async function POST(request: NextRequest) {
       companyEmail: company.company_email || '',
       gstNo: company.gst_no || '',
       generatedDate: formatDate(new Date().toISOString()),
-      salesExecutives,
+      salesExecutives: [{
+        name: targetSalesExecutiveName,
+        customers,
+      }],
     };
 
-    // Step 10: Generate PDF
+    // Step 13: Generate PDF
     const LedgerElement = React.createElement(LedgerTemplate, { data: ledgerData });
     const pdfDoc = pdf(LedgerElement as React.ReactElement<DocumentProps>);
 
@@ -263,18 +317,18 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await blob.arrayBuffer();
     const pdfBuffer = Buffer.from(arrayBuffer);
 
-    // Step 11: Return PDF as downloadable file
+    // Step 14: Return PDF as downloadable file
     return new NextResponse(pdfBuffer, {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="ledger-${formatDate(new Date().toISOString())}.pdf"`,
+        'Content-Disposition': `attachment; filename="ledger-${targetSalesExecutiveName}-${formatDate(new Date().toISOString())}.pdf"`,
       },
     });
   } catch (error: unknown) {
-    console.error('API Error generating ledger:', error);
+    console.error('API Error generating sales executive ledger:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'An error occurred while generating ledger' },
+      { error: error instanceof Error ? error.message : 'An error occurred while generating sales executive ledger' },
       { status: 500 }
     );
   }

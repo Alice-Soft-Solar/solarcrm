@@ -539,32 +539,22 @@ export default function WorkOrdersPage() {
               )}
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-foreground">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium">
                 Customer Address <span className="text-red-500">*</span>
               </label>
+
               <textarea
-                required
                 value={formData.customer_address}
-                onChange={(e) => {
-                  setFormData({ ...formData, customer_address: e.target.value });
-                  // Clear error when user starts typing
-                  if (errors.customer_address) {
-                    setErrors({ ...errors, customer_address: '' });
-                  }
-                }}
-                rows={3}
-                className={`mt-1 block w-full rounded-md border px-3 py-2 text-foreground placeholder-zinc-400 focus:outline-none focus:ring-2 transition-all duration-200 ${
-                  errors.customer_address 
-                    ? 'border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500' 
-                    : 'border-border bg-white focus:border-accent focus:ring-accent'
-                }`}
-                placeholder="123 Main St, City, State"
+                onChange={(e) =>
+                  setFormData({ ...formData, customer_address: e.target.value })
+                }
+                rows={2}
+                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2"
+                placeholder="House No, Street, Area, City, State, Pincode"
               />
-              {errors.customer_address && (
-                <p className="mt-1 text-xs text-red-600">{errors.customer_address}</p>
-              )}
             </div>
+
 
             <div>
               <label className="block text-sm font-medium text-foreground">
@@ -716,7 +706,7 @@ export default function WorkOrdersPage() {
               <textarea
                 value={formData.site_details}
                 onChange={(e) => setFormData({ ...formData, site_details: e.target.value })}
-                rows={4}
+                rows={3}
                 className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
                 placeholder="Additional site information..."
               />

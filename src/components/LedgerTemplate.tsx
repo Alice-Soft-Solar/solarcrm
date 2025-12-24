@@ -12,6 +12,7 @@ import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer';
 
 interface LedgerTransaction {
   date: string;
+  workOrderNo: string;
   itemName: string; // plant_capacity
   type: 'ORDER' | 'CASH' | 'BANK' | 'CHEQUE' | 'UPI' | 'ONLINE' | 'CARD';
   orderCost: number | null;
@@ -72,15 +73,16 @@ export const LedgerTemplate = ({ data }: LedgerTemplateProps) => {
 
         {/* Table Header */}
         <View style={styles.tableHeader}>
-          <Text style={[styles.cell, styles.colDate]}>Trans.Date</Text>
-          <Text style={[styles.cell, styles.colCustomer]}>Customer Name</Text>
-          <Text style={[styles.cell, styles.colTown]}>Town</Text>
-          <Text style={[styles.cell, styles.colMobile]}>Mobile</Text>
-          <Text style={[styles.cell, styles.colItem]}>ItemName</Text>
-          <Text style={[styles.cell, styles.colType]}>Tr.Type</Text>
-          <Text style={[styles.cell, styles.colAmount]}>OrderCost</Text>
-          <Text style={[styles.cell, styles.colAmount]}>ReceivedAmt</Text>
-          <Text style={[styles.cell, styles.colAmount]}>Balance</Text>
+          <Text style={[styles.cell, styles.colDate, styles.noWrap]}>Trans.Date</Text>
+          <Text style={[styles.cell, styles.colWorkOrder, styles.noWrap]}>Work Order No</Text>
+          <Text style={[styles.cell, styles.colCustomer, styles.noWrap]}>Customer Name</Text>
+          <Text style={[styles.cell, styles.colTown, styles.noWrap]}>Town</Text>
+          <Text style={[styles.cell, styles.colMobile, styles.noWrap]}>Mobile</Text>
+          <Text style={[styles.cell, styles.colItem, styles.noWrap]}>ItemName</Text>
+          <Text style={[styles.cell, styles.colType, styles.noWrap]}>Tr.Type</Text>
+          <Text style={[styles.cell, styles.colAmount, styles.amountCell, styles.noWrap]}>OrderCost</Text>
+          <Text style={[styles.cell, styles.colAmount, styles.amountCell, styles.noWrap]}>ReceivedAmt</Text>
+          <Text style={[styles.cell, styles.colAmount, styles.amountCell, styles.noWrap]}>Balance</Text>
         </View>
 
         {/* Table Body - Grouped by Sales Executive → Customer */}
@@ -100,6 +102,9 @@ export const LedgerTemplate = ({ data }: LedgerTemplateProps) => {
                     <Text style={[styles.cell, styles.colDate, styles.cellText]}>
                       {transaction.date}
                     </Text>
+                    <Text style={[styles.cell, styles.colWorkOrder, styles.cellText]}>
+                      {transaction.workOrderNo}
+                    </Text>
                     <Text style={[styles.cell, styles.colCustomer, styles.cellText]}>
                       {transIndex === 0 ? customer.name : ''}
                     </Text>
@@ -115,19 +120,41 @@ export const LedgerTemplate = ({ data }: LedgerTemplateProps) => {
                     <Text style={[styles.cell, styles.colType, styles.cellText]}>
                       {transaction.type}
                     </Text>
-                    <Text style={[styles.cell, styles.colAmount, styles.cellText, styles.alignRight]}>
+                    <Text style={[styles.cell, styles.colAmount, styles.cellText, styles.amountCell]}>
                       {transaction.orderCost !== null ? transaction.orderCost.toFixed(2) : ''}
                     </Text>
-                    <Text style={[styles.cell, styles.colAmount, styles.cellText, styles.alignRight]}>
+                    <Text style={[styles.cell, styles.colAmount, styles.cellText, styles.amountCell]}>
                       {transaction.receivedAmt !== null ? transaction.receivedAmt.toFixed(2) : ''}
                     </Text>
-                    <Text style={[styles.cell, styles.colAmount, styles.cellText, styles.alignRight]}>
+                    <Text style={[styles.cell, styles.colAmount, styles.cellText, styles.amountCell]}>
                       {transaction.balance.toFixed(2)}
                     </Text>
                   </View>
                 ))}
               </View>
             ))}
+            
+            {/* Total Work Orders Row */}
+            {(() => {
+              const totalOrders = executive.customers.reduce(
+                (sum, customer) => sum + customer.transactions.filter(t => t.type === 'ORDER').length,
+                0
+              );
+              return (
+                <View style={styles.totalRow}>
+                  <Text style={[styles.cell, styles.colDate]}></Text>
+                  <Text style={[styles.cell, styles.colWorkOrder]}></Text>
+                  <Text style={[styles.cell, styles.colCustomer]}></Text>
+                  <Text style={[styles.cell, styles.colTown]}></Text>
+                  <Text style={[styles.cell, styles.colMobile]}></Text>
+                  <Text style={[styles.cell, styles.colItem]}></Text>
+                  <Text style={[styles.cell, styles.colType, styles.totalLabel]}>TOTAL</Text>
+                  <Text style={[styles.cell, styles.colAmount, styles.amountCell, styles.totalValue]}>{totalOrders}</Text>
+                  <Text style={[styles.cell, styles.colAmount]}></Text>
+                  <Text style={[styles.cell, styles.colAmount]}></Text>
+                </View>
+              );
+            })()}
           </View>
         ))}
       </Page>
@@ -202,36 +229,42 @@ const styles = StyleSheet.create({
   },
   cell: {
     paddingVertical: 3,
-    paddingHorizontal: 2,
+    paddingHorizontal: 4,
     fontSize: 7,
     fontWeight: 'bold',
+  },
+  amountCell: {
+    textAlign: 'right',
+  },
+  noWrap: {
+    whiteSpace: 'nowrap',
   },
   cellText: {
     fontWeight: 'normal',
   },
-  // Column widths (total should be ~100%)
-  colDate: {
-    width: '10%',
+  // Column widths - Fixed numeric widths for A4 landscape (~800 total for proper fit)
+  colDate: { width: 50 },
+  colWorkOrder: { width: 70 },
+  colCustomer: { width: 130 },
+  colTown: { width: 85 },
+  colMobile: { width: 90 },
+  colItem: { width: 65 },
+  colType: { width: 55 },
+  colAmount: { width: 75 },
+
+  totalRow: {
+    flexDirection: 'row',
+    backgroundColor: '#f5f5f5',
+    borderTop: '1 solid #000',
+    borderBottom: '1 solid #000',
+    paddingVertical: 4,
   },
-  colCustomer: {
-    width: '18%',
+  totalLabel: {
+    fontWeight: 'bold',
+    textAlign: 'left',
   },
-  colTown: {
-    width: '10%',
-  },
-  colMobile: {
-    width: '11%',
-  },
-  colItem: {
-    width: '10%',
-  },
-  colType: {
-    width: '8%',
-  },
-  colAmount: {
-    width: '11%',
-  },
-  alignRight: {
-    textAlign: 'right',
+  totalValue: {
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
 });

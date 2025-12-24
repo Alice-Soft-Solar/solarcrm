@@ -155,6 +155,7 @@ export default function WorkOrdersListPage() {
 
   // Ledger PDF generation state
   const [generatingLedger, setGeneratingLedger] = useState(false);
+  const [generatingSalesExecLedger, setGeneratingSalesExecLedger] = useState(false);
 
   // Dispatch confirmation state
   const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
@@ -1411,6 +1412,87 @@ export default function WorkOrdersListPage() {
     }
   };
 
+  // Handler for generating sales executive ledger PDF
+  const handleGenerateSalesExecLedger = async () => {
+    if (!profile?.company_id || !user) {
+      alert('Missing required information. Please refresh the page.');
+      return;
+    }
+
+    // For Admin/Super Admin: require sales executive filter selection
+    if (roleName === 'Admin' || roleName === 'Super Admin') {
+      if (!filterSalesExecutive) {
+        alert('Please select a sales executive from the filter dropdown first.');
+        return;
+      }
+
+      // Confirmation dialog for Admin
+      const confirmed = window.confirm(
+        `Generate ledger for ${filterSalesExecutive}?\n\nThis will create a PDF with all work orders and payments for this sales executive.`
+      );
+      if (!confirmed) return;
+    } else if (roleName === 'Sales') {
+      // Confirmation dialog for Sales
+      const confirmed = window.confirm(
+        'Generate your ledger?\n\nThis will create a PDF with all your work orders and payments.'
+      );
+      if (!confirmed) return;
+    }
+
+    setGeneratingSalesExecLedger(true);
+    try {
+      const accessToken = getAccessToken();
+      const requestBody: any = {
+        ...(accessToken && { access_token: accessToken }),
+        company_id: profile.company_id,
+        user_id: user.id,
+      };
+
+      // For Admin: include sales_executive_name
+      if (roleName === 'Admin' || roleName === 'Super Admin') {
+        requestBody.sales_executive_name = filterSalesExecutive;
+      }
+      // For Sales: API will auto-detect from profile
+
+      const response = await fetch('/api/ledger/sales-executive/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to generate sales executive ledger');
+      }
+
+      // Download PDF
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const today = new Date().toISOString().split('T')[0];
+      const execName = roleName === 'Sales' ? 'my' : filterSalesExecutive.replace(/\s+/g, '-').toLowerCase();
+      link.download = `ledger-${execName}-${today}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error('Error generating sales executive ledger:', error.message);
+        alert(`Error: ${error.message}`);
+      } else {
+        console.error('Unknown error generating sales executive ledger:', error);
+        alert('Error: Failed to generate sales executive ledger PDF');
+      }
+    } finally {
+      setGeneratingSalesExecLedger(false);
+    }
+  };
+
   const handleConfirmDispatch = async () => {
     if (!dispatchingWorkOrder || !user || !profile) return;
 
@@ -1482,6 +1564,22 @@ export default function WorkOrdersListPage() {
         title="Work Orders"
         rightAction={
           <>
+            {/* Sales Executive Ledger Button - for Sales (always) or Admin (when filter selected) */}
+            {(roleName === 'Sales' || 
+              ((roleName === 'Admin' || roleName === 'Super Admin') && filterSalesExecutive)) && (
+              <Button
+                onClick={handleGenerateSalesExecLedger}
+                disabled={generatingSalesExecLedger}
+                variant="secondary"
+                size="sm"
+                className="mr-2"
+              >
+                {generatingSalesExecLedger 
+                  ? 'Generating...' 
+                  : (roleName === 'Sales' ? 'Generate My Ledger' : 'Generate Executive Ledger')}
+              </Button>
+            )}
+            {/* Admin Ledger Button - for Admin only */}
             {(roleName === 'Admin' || roleName === 'Super Admin') && (
               <Button
                 onClick={handleGenerateLedger}

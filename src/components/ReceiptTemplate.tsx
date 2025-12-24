@@ -65,7 +65,7 @@ export const ReceiptTemplate = ({ data }: ReceiptTemplateProps) => {
             </View>
             <View style={styles.rightCell}>
               <Text style={styles.label}>Receipt Date :</Text>
-              <Text style={styles.value}>{formatDate(data.receiptDate)}</Text>
+              <Text style={[styles.value, { marginLeft: 6 }]}>{formatDate(data.receiptDate)}</Text>
             </View>
           </View>
 
@@ -100,7 +100,7 @@ export const ReceiptTemplate = ({ data }: ReceiptTemplateProps) => {
             </View>
             <View style={styles.rightCell}>
               <Text style={styles.label}>Cheque No :</Text>
-              <Text style={styles.value}>{data.chequeNo || ''}</Text>
+              <Text style={[styles.value, { marginLeft: 6 }]}>{data.chequeNo || ''}</Text>
             </View>
           </View>
 
@@ -182,16 +182,13 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: 'row',
-    borderBottom: '1 solid #000',
   },
   fullRow: {
-    borderBottom: '1 solid #000',
     padding: 6,
     flexDirection: 'row',
   },
   leftCell: {
     flex: 1,
-    borderRight: '1 solid #000',
     padding: 6,
     flexDirection: 'row',
   },
@@ -217,6 +214,8 @@ const styles = StyleSheet.create({
     flex: 1,
     fontWeight: 'bold',
     fontSize: 11,
+    borderBottom: '1 solid #000',
+    paddingBottom: 2,
   },
   amountWords: {
     flex: 1,

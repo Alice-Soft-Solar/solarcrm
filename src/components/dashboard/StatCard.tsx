@@ -13,6 +13,7 @@ interface StatCardProps {
   };
   icon?: React.ReactNode;
   color?: 'blue' | 'green' | 'orange' | 'purple' | 'red';
+  onClick?: () => void;
 }
 
 export default function StatCard({
@@ -22,6 +23,7 @@ export default function StatCard({
   trend,
   icon,
   color = 'blue',
+  onClick,
 }: StatCardProps) {
   const [displayValue, setDisplayValue] = useState(0);
   const isNumeric = typeof value === 'number';
@@ -106,10 +108,12 @@ export default function StatCard({
 
   return (
     <div
+      onClick={onClick}
       className={`
         group relative overflow-hidden rounded-2xl border ${config.border} 
         ${config.bg} p-6 transition-all duration-300
         hover:shadow-xl ${shadowClass} hover:-translate-y-1
+        ${onClick ? 'cursor-pointer' : ''}
       `}
     >
       {/* Animated gradient background */}

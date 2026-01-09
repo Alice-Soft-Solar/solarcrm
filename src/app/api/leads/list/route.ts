@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient, verifyUserAndGetProfile, hasRole, getServiceClient } from '@/lib/supabase-server';
+import { createServerClient, verifyUserAndGetProfile, hasRole } from '@/lib/supabase-server';
 
 /**
  * API route to fetch leads list
@@ -203,9 +203,8 @@ export async function POST(request: NextRequest) {
     
     if (creatorIds.length > 0) {
       try {
-        // Use service client to bypass RLS for profile lookup (same as executives route)
-        const serviceClient = getServiceClient();
-        const { data: profilesData, error: profilesError } = await serviceClient
+        // Use authenticated supabase client for profile lookup
+        const { data: profilesData, error: profilesError } = await supabase
           .from('profiles')
           .select('id, full_name')
           .in('id', creatorIds);

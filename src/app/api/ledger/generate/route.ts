@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, verifyUserAndGetProfile } from '@/lib/supabase-server';
-import { createClient } from '@supabase/supabase-js';
 import React from 'react';
 import { pdf, DocumentProps } from '@react-pdf/renderer';
 import { LedgerTemplate } from '@/components/LedgerTemplate';
@@ -74,15 +73,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Step 3: Create service role client to bypass RLS for data fetching
-    // This is necessary because ledger needs to see all profiles/work orders across the company
-    const adminSupabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    // Step 4: Fetch company details using admin client
-    const { data: company, error: companyError } = await adminSupabase
+    // Step 3: Fetch company details (using authenticated supabase)
+    const { data: company, error: companyError } = await supabase
       .from('companies')
       .select('name, company_address, company_phone1, company_phone2, company_email, gst_no')
       .eq('id', companyId)
@@ -95,8 +87,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Step 5: Fetch all work orders for this company using admin client
-    const { data: workOrders, error: workOrdersError } = await adminSupabase
+    // Step 4: Fetch all work orders for this company
+    const { data: workOrders, error: workOrdersError } = await supabase
       .from('work_orders')
       .select(`
         id,
@@ -127,10 +119,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Step 6: Fetch sales executive names using admin client (bypasses RLS)
-    // This is critical - without service role, RLS filters out other users' profiles
+    // Step 6: Fetch sales executive names using anon client (RLS enforced)
+    // RLS policies must allow access to profiles within the same company
     const salesExecIds = [...new Set(workOrders.map(wo => wo.sales_executive_id))];
-    const { data: profiles, error: profilesError } = await adminSupabase
+    const { data: profiles, error: profilesError } = await supabase
       .from('profiles')
       .select('id, full_name')
       .in('id', salesExecIds);
@@ -142,9 +134,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Step 7: Fetch all payments for these work orders using admin client
+    // Step 5: Fetch all payments for these work orders
     const workOrderIds = workOrders.map(wo => wo.id);
-    const { data: payments, error: paymentsError } = await adminSupabase
+    const { data: payments, error: paymentsError } = await supabase
       .from('payments_data')
       .select('id, work_order_id, amount, transaction_date, payment_method')
       .in('work_order_id', workOrderIds)

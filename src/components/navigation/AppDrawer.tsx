@@ -29,24 +29,25 @@ export default function AppDrawer({ roleName, menuItems, isOpen, onToggle }: App
 
   return (
     <>
-      {/* Backdrop overlay for mobile */}
+      {/* Backdrop overlay for mobile - Higher z-index to prevent drawer from getting stuck */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          className="fixed inset-0 bg-black/50 z-[45] lg:hidden"
           onClick={onToggle}
           aria-hidden="true"
         />
       )}
       
-      {/* Sidebar - Slides from left */}
+      {/* Sidebar - Slides from left with proper layering and scrolling */}
       <div
         className={`
-          fixed left-0 top-0 z-50 h-full 
+          fixed left-0 top-0 z-[46] h-full 
           w-72 sm:w-72 max-w-[85vw] bg-gradient-to-b from-white via-white to-zinc-50
           border-r border-border shadow-2xl
           transform transition-transform duration-300 ease-in-out
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
           lg:z-40
+          overflow-hidden
         `}
       >
         <div className="flex h-full flex-col">
@@ -85,7 +86,7 @@ export default function AppDrawer({ roleName, menuItems, isOpen, onToggle }: App
             </div>
           </div>
 
-          {/* Menu Items with Green Theme */}
+          {/* Menu Items with Green Theme - Scrollable */}
           <nav className="flex-1 overflow-y-auto px-4 py-6">
             <div className="space-y-2">
               {filteredItems.map((item, index) => {

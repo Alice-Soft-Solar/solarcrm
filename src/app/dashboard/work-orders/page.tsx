@@ -7,6 +7,7 @@ import Link from 'next/link';
 import PageHeader from '@/components/PageHeader';
 import { LoadingSpinner, Button } from '@/components/ui';
 import { getAccessToken } from '@/lib/supabase-client';
+import { compressImage, isCompressibleImage } from '@/utils/compressImage';
 
 interface User {
   id: string;
@@ -33,6 +34,7 @@ export default function WorkOrdersPage() {
     work_order_number: '',
     customer_name: '',
     customer_address: '',
+    town: '',
     customer_email: '',
     customer_phone: '',
     power_bill: '',
@@ -179,12 +181,28 @@ export default function WorkOrdersPage() {
    */
   const generateNextWorkOrderNumber = async (companyId: string) => {
     try {
-      const response = await fetch('/api/work-orders/next-number', {
+      // Get access token from Supabase session
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+
+      if (!accessToken) {
+        console.error('No access token found in session');
+        setFormData((prev) => ({
+          ...prev,
+          work_order_number: 'AUTO-GENERATE',
+        }));
+        return;
+      }
+
+      // Call Supabase Edge Function (RLS-enforced, no service role key)
+      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/generate-work-order-number`;
+      
+      const response = await fetch(edgeFunctionUrl, {
         method: 'POST',
         headers: {
+          'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ company_id: companyId }),
       });
 
       const result = await response.json();
@@ -197,7 +215,6 @@ export default function WorkOrdersPage() {
         console.log('✅ Work order number generated:', result.work_order_number);
       } else {
         console.error('Failed to generate work order number:', result.error);
-        // Set a placeholder if generation fails
         setFormData((prev) => ({
           ...prev,
           work_order_number: 'AUTO-GENERATE',
@@ -205,7 +222,6 @@ export default function WorkOrdersPage() {
       }
     } catch (error) {
       console.error('Error generating work order number:', error);
-      // Set a placeholder if generation fails
       setFormData((prev) => ({
         ...prev,
         work_order_number: 'AUTO-GENERATE',
@@ -303,12 +319,12 @@ export default function WorkOrdersPage() {
       return;
     }
 
-    // Validate file size (5MB limit)
-    const maxSize = 5 * 1024 * 1024; // 5MB in bytes
+    // Validate file size (8MB limit before compression)
+    const maxSize = 10 * 1024 * 1024; // 8MB in bytes
     if (file.size > maxSize) {
       setUploadStates(prev => ({
         ...prev,
-        [docType]: { loading: false, error: 'File size exceeds 5MB limit.' },
+        [docType]: { loading: false, error: 'File size exceeds 10MB limit.' },
       }));
       return;
     }
@@ -320,8 +336,19 @@ export default function WorkOrdersPage() {
     }));
 
     try {
+      // Compress image files before upload
+      let fileToUpload = file;
+      if (isCompressibleImage(file)) {
+        try {
+          fileToUpload = await compressImage(file);
+        } catch (compressionError) {
+          console.warn('Image compression failed, uploading original:', compressionError);
+          // Continue with original file if compression fails
+        }
+      }
+
       const { publicUrl, signedUrl } = await uploadDocumentToSupabase({
-        file,
+        file: fileToUpload,
         docType,
         companyId: profile.company_id,
       });
@@ -366,6 +393,9 @@ export default function WorkOrdersPage() {
     }
     if (!formData.customer_address.trim()) {
       newErrors.customer_address = 'Customer address did not fill';
+    }
+    if (!formData.town.trim()) {
+      newErrors.town = 'Town is required';
     }
     if (!formData.customer_phone.trim()) {
       newErrors.customer_phone = 'Customer phone number did not fill';
@@ -424,6 +454,7 @@ export default function WorkOrdersPage() {
           work_order_number: formData.work_order_number,
           customer_name: formData.customer_name,
           customer_address: formData.customer_address,
+          town: formData.town,
           customer_email: formData.customer_email || null,
           customer_phone: formData.customer_phone,
           power_bill: formData.power_bill ? parseFloat(formData.power_bill) : null,
@@ -555,13 +586,39 @@ export default function WorkOrdersPage() {
               />
             </div>
 
+            <div>
+              <label className="block text-sm font-medium text-foreground">
+                Town <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={formData.town}
+                onChange={(e) => {
+                  setFormData({ ...formData, town: e.target.value });
+                  if (errors.town) {
+                    setErrors({ ...errors, town: '' });
+                  }
+                }}
+                className={`mt-1 block w-full rounded-md border px-3 py-2 text-foreground placeholder-zinc-400 focus:outline-none focus:ring-2 transition-all duration-200 ${
+                  errors.town 
+                    ? 'border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500' 
+                    : 'border-border bg-white focus:border-accent focus:ring-accent'
+                }`}
+                placeholder="Enter town name"
+              />
+              {errors.town && (
+                <p className="mt-1 text-xs text-red-600">{errors.town}</p>
+              )}
+            </div>
 
             <div>
               <label className="block text-sm font-medium text-foreground">
-                Customer Email
+                Customer Email <span className="text-red-500">*</span>
               </label>
               <input
                 type="email"
+                required
                 value={formData.customer_email}
                 onChange={(e) => setFormData({ ...formData, customer_email: e.target.value })}
                 className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
@@ -598,77 +655,96 @@ export default function WorkOrdersPage() {
 
             <div>
               <label className="block text-sm font-medium text-foreground">
-                Power Bill
+                Power Bill <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
                 step="0.01"
+                required
                 value={formData.power_bill}
                 onChange={(e) => setFormData({ ...formData, power_bill: e.target.value })}
-                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
+                onWheel={(e) => (e.target as HTMLInputElement).blur()}
+                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 placeholder="320.50"
               />
             </div>
 
             <div>
               <label className="block text-sm font-medium text-foreground">
-                Power Units
+                Power Units <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
                 step="0.01"
+                required
                 value={formData.power_units}
                 onChange={(e) => setFormData({ ...formData, power_units: e.target.value })}
-                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
+                onWheel={(e) => (e.target as HTMLInputElement).blur()}
+                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 placeholder="280"
               />
             </div>
 
             <div>
               <label className="block text-sm font-medium text-foreground">
-                Structure Height
+                Structure Height <span className="text-red-500">*</span>
               </label>
-              <input
-                type="text"
+              <select
+                required
                 value={formData.structure_height}
                 onChange={(e) => setFormData({ ...formData, structure_height: e.target.value })}
-                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
-                placeholder="10 feet"
-              />
+                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
+              >
+                <option value="">Select height</option>
+                <option value="3-4Ft">3-4Ft</option>
+                <option value="6-7Ft">6-7Ft</option>
+                <option value="8-10Ft">8-10Ft</option>
+              </select>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-foreground">
-                Roof Type
+                Roof Type <span className="text-red-500">*</span>
               </label>
-              <input
-                type="text"
+              <select
+                required
                 value={formData.roof_type}
                 onChange={(e) => setFormData({ ...formData, roof_type: e.target.value })}
-                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
-                placeholder="Flat, Sloped, etc."
-              />
+                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
+              >
+                <option value="">Select roof type</option>
+                <option value="Iron Shed">Iron Shed</option>
+                <option value="RCC">RCC</option>
+                <option value="Single Floor">Single Floor</option>
+                <option value="Double Floor">Double Floor</option>
+                <option value="Apartment">Apartment</option>
+                <option value="Ground">Ground</option>
+                <option value="Asbestos Sheet">Asbestos Sheet</option>
+              </select>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-foreground">
-                Plant Capacity
+                Plant Capacity <span className="text-red-500">*</span>
               </label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
+              <select
+                required
                 value={formData.plant_capacity}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  // Only allow numeric input
-                  if (value === '' || /^\d*\.?\d*$/.test(value)) {
-                    setFormData({ ...formData, plant_capacity: value });
-                  }
-                }}
-                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground placeholder-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
-                placeholder="5, 10, etc."
-              />
+                onChange={(e) => setFormData({ ...formData, plant_capacity: e.target.value })}
+                className="mt-1 block w-full rounded-md border border-border bg-white px-3 py-2 text-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
+              >
+                <option value="">Select capacity</option>
+                <option value="1">1KW</option>
+                <option value="2">2KW</option>
+                <option value="3">3KW</option>
+                <option value="4">4KW</option>
+                <option value="5">5KW</option>
+                <option value="6">6KW</option>
+                <option value="7">7KW</option>
+                <option value="8">8KW</option>
+                <option value="9">9KW</option>
+                <option value="10">10KW</option>
+              </select>
             </div>
 
             <div>
@@ -687,7 +763,8 @@ export default function WorkOrdersPage() {
                     setErrors({ ...errors, order_amount: '' });
                   }
                 }}
-                className={`mt-1 block w-full rounded-md border px-3 py-2 text-foreground placeholder-zinc-400 focus:outline-none focus:ring-2 transition-all duration-200 ${
+                onWheel={(e) => (e.target as HTMLInputElement).blur()}
+                className={`mt-1 block w-full rounded-md border px-3 py-2 text-foreground placeholder-zinc-400 focus:outline-none focus:ring-2 transition-all duration-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
                   errors.order_amount 
                     ? 'border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500' 
                     : 'border-border bg-white focus:border-accent focus:ring-accent'

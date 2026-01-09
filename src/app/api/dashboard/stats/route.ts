@@ -41,6 +41,8 @@ export async function POST(request: NextRequest) {
       },
     };
 
+    let totalOrderAmount = 0;
+
     // Step 5: Fetch leads statistics (if user has access)
     const LEADS_ALLOWED_ROLES = ['Sales', 'salesLead', 'Admin', 'Super Admin'];
     const hasLeadsAccess = LEADS_ALLOWED_ROLES.includes(roleName);
@@ -137,8 +139,9 @@ export async function POST(request: NextRequest) {
 
     // Step 6: Fetch work orders statistics (if user has access)
     // Sales Lead now has access to work orders (same as Sales - only their own)
-    const WORK_ORDER_ALLOWED_ROLES = ['Sales', 'salesLead', 'Admin', 'Super Admin', 'Inventory', 'Accounts'];
+    const WORK_ORDER_ALLOWED_ROLES = ['Sales', 'salesLead', 'Admin', 'Super Admin', 'Inventory', 'Accounts', 'BackOffice'];
     const hasWorkOrderAccess = WORK_ORDER_ALLOWED_ROLES.includes(roleName);
+    const isBackOffice = roleName === 'BackOffice';
 
     if (hasWorkOrderAccess) {
       try {
@@ -150,6 +153,26 @@ export async function POST(request: NextRequest) {
           workOrdersQuery = workOrdersQuery
             .eq('company_id', companyId)
             .or('work_order_status.eq.To Be Dispatched,work_order_status.eq.Dispatched');
+        } else if (isBackOffice) {
+          // BackOffice: See work orders from Dispatched onwards
+          workOrdersQuery = workOrdersQuery
+            .eq('company_id', companyId)
+            .in('work_order_status', [
+              'Dispatched',
+              'Erection and Installation',
+              'Dept. Submission of Docs',
+              'Meter Installation',
+              'Subsidy Ready for Redemption',
+              'Customer Eligible for Redemption',
+              'Subsidy Follow Up',
+              'Subsidy Received by Customer',
+              'Online Mobile App Demo to Customer',
+              'Tata Sales Force Upload',
+              'Warranty Certificate Approval',
+              'Warranty Rejected',
+              'Warranty Certificate Given to Customer',
+              'Successfully Completed'
+            ]);
         } else if (isAccounts) {
           // Accounts: See all company work orders (for count only)
           workOrdersQuery = workOrdersQuery.eq('company_id', companyId);
@@ -167,62 +190,47 @@ export async function POST(request: NextRequest) {
         if (workOrdersError) {
           console.error('Error fetching work orders stats:', workOrdersError);
         } else if (workOrdersData) {
-          // For Inventory: Need to verify 65% payment for "To Be Dispatched" status
-          let filteredWorkOrders = workOrdersData;
+          // Calculate statistics (simple status-based counting)
+          const total = workOrdersData.length;
 
-          if (isInventory) {
-            // Get work order IDs that need payment verification
-            const toBeDispatchedIds = workOrdersData
-              .filter(w => w.work_order_status === 'To Be Dispatched')
-              .map(w => w.id);
-
-            if (toBeDispatchedIds.length > 0) {
-              // Fetch payments for these work orders
-              const { data: paymentsData } = await supabase
-                .from('payments_data')
-                .select('work_order_id, first_payment, second_payment, final_payment, additional_payment')
-                .in('work_order_id', toBeDispatchedIds);
-
-              if (paymentsData) {
-                const paymentsByWorkOrder: Record<string, number> = {};
-                paymentsData.forEach((payment: any) => {
-                  const workOrderId = payment.work_order_id;
-                  if (!paymentsByWorkOrder[workOrderId]) {
-                    paymentsByWorkOrder[workOrderId] = 0;
-                  }
-                  paymentsByWorkOrder[workOrderId] += parseFloat(payment.first_payment || 0);
-                  paymentsByWorkOrder[workOrderId] += parseFloat(payment.second_payment || 0);
-                  paymentsByWorkOrder[workOrderId] += parseFloat(payment.final_payment || 0);
-                  paymentsByWorkOrder[workOrderId] += parseFloat(payment.additional_payment || 0);
-                });
-
-                // Filter: Only include "To Be Dispatched" if payment >= 65%
-                filteredWorkOrders = workOrdersData.filter((w: any) => {
-                  if (w.work_order_status === 'Dispatched') {
-                    return true; // Always include "Dispatched"
-                  }
-                  if (w.work_order_status === 'To Be Dispatched') {
-                    const totalPaid = paymentsByWorkOrder[w.id] || 0;
-                    const orderAmount = parseFloat(w.order_amount?.toString() || '0');
-                    return orderAmount > 0 && totalPaid >= orderAmount * 0.65;
-                  }
-                  return false;
-                });
-              } else {
-                // No payments data, only show "Dispatched"
-                filteredWorkOrders = workOrdersData.filter((w: any) => w.work_order_status === 'Dispatched');
-              }
+          // Build status distribution chart data
+          const statusCounts: Record<string, number> = {};
+          workOrdersData.forEach((w: any) => {
+            if (w.work_order_status) {
+              const status = w.work_order_status;
+              statusCounts[status] = (statusCounts[status] || 0) + 1;
             }
+          });
+
+          // Status counts (normalized)
+          const pending = (statusCounts['Pending'] || 0) + (statusCounts['Created'] || 0);
+          const toBeDispatched = statusCounts['To Be Dispatched'] || 0;
+          const dispatched = statusCounts['Dispatched'] || 0;
+          const advancePaid = statusCounts['Advance Paid'] || 0;
+          const closed = (statusCounts['Closed'] || 0) + 
+                         (statusCounts['Completed'] || 0) + 
+                         (statusCounts['Successfully Completed'] || 0);
+
+          // Calculate total order amount for Admin (Exclude Cancelled/Rejected/No Status)
+          if (isAdmin) {
+            // Log status-wise amounts for debugging
+            const statusAmounts: Record<string, number> = {};
+            workOrdersData.forEach((w: any) => {
+              const status = w.work_order_status || 'No Status';
+              statusAmounts[status] = (statusAmounts[status] || 0) + (parseFloat(w.order_amount?.toString() || '0'));
+            });
+            console.log('[DASHBOARD STATS DEBUG] Status-wise Amounts:', statusAmounts);
+
+            const activeOrders = workOrdersData.filter((w: any) => 
+              w.work_order_status && 
+              w.work_order_status !== 'Created' && // EXCLUDE 'Created'
+              w.work_order_status !== 'To Be Dispatched' && // EXCLUDE 'To Be Dispatched' as they are often pre-payment test/lead orders
+              w.work_order_status !== 'Cancelled' && 
+              w.work_order_status !== 'Rejected' &&
+              w.work_order_status !== 'Order Cancelled'
+            );
+            totalOrderAmount = activeOrders.reduce((sum, w: any) => sum + (parseFloat(w.order_amount?.toString() || '0')), 0);
           }
-
-          // Calculate statistics from filtered data
-          const total = filteredWorkOrders.length;
-
-          // Status counts
-          const toBeDispatched = filteredWorkOrders.filter((w: any) => w.work_order_status === 'To Be Dispatched').length;
-          const dispatched = filteredWorkOrders.filter((w: any) => w.work_order_status === 'Dispatched').length;
-          const installed = isInventory ? 0 : filteredWorkOrders.filter((w: any) => w.work_order_status === 'Installed').length;
-          const completed = isInventory ? 0 : filteredWorkOrders.filter((w: any) => w.work_order_status === 'Completed').length;
 
           // Time-based counts
           const now = new Date();
@@ -231,46 +239,59 @@ export async function POST(request: NextRequest) {
           thisWeekStart.setDate(today.getDate() - today.getDay());
           const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-          const todayCount = filteredWorkOrders.filter((w: any) => {
+          const todayCount = workOrdersData.filter((w: any) => {
             const createdAt = new Date(w.created_at);
             return createdAt >= today;
           }).length;
 
-          const thisWeekCount = filteredWorkOrders.filter((w: any) => {
+          const thisWeekCount = workOrdersData.filter((w: any) => {
             const createdAt = new Date(w.created_at);
             return createdAt >= thisWeekStart;
           }).length;
 
-          const thisMonthCount = filteredWorkOrders.filter((w: any) => {
+          const thisMonthCount = workOrdersData.filter((w: any) => {
             const createdAt = new Date(w.created_at);
             return createdAt >= thisMonthStart;
           }).length;
 
           response.stats.workOrders = {
             total,
+            pending,
             toBeDispatched,
             dispatched,
-            installed,
-            completed,
+            installed: statusCounts['Installed'] || 0,
+            completed: statusCounts['Completed'] || 0,
+            advancePaid,
+            closed,
             today: todayCount,
             thisWeek: thisWeekCount,
             thisMonth: thisMonthCount,
           };
 
           // Build status distribution chart data
+          // Include "Unknown" for those without status
+          if (!isInventory) {
+             const missingStatusCount = workOrdersData.filter((w: any) => !w.work_order_status).length;
+             if (missingStatusCount > 0) {
+               statusCounts['Unknown'] = missingStatusCount;
+             }
+          }
           // For Inventory: Only show "To Be Dispatched" and "Dispatched"
           if (isInventory) {
             response.stats.charts.statusDistribution = {
               'To Be Dispatched': toBeDispatched,
               'Dispatched': dispatched,
             };
+          } else if (isBackOffice || isAdmin) {
+            // For BackOffice and Admin: Show full status distribution in the pie chart
+            response.stats.charts.statusDistribution = statusCounts;
           } else {
-            // For other roles: Show all statuses
+            // For other roles: Show limited statuses
             response.stats.charts.statusDistribution = {
               'To Be Dispatched': toBeDispatched,
               'Dispatched': dispatched,
-              'Installed': installed,
-              'Completed': completed,
+              'Installed': statusCounts['Installed'] || 0,
+              'Completed': statusCounts['Completed'] || 0,
             };
           }
         }
@@ -306,11 +327,14 @@ export async function POST(request: NextRequest) {
 
           const todayReceived = todayPayments.reduce((sum, p) => sum + (parseFloat(p.amount?.toString() || '0')), 0);
           const monthlyReceived = monthlyPayments.reduce((sum, p) => sum + (parseFloat(p.amount?.toString() || '0')), 0);
+          const totalReceived = paymentsData.reduce((sum, p) => sum + (parseFloat(p.amount?.toString() || '0')), 0);
 
           response.stats.payments = {
+            totalReceived,
             todayReceived,
             monthlyReceived,
-            pending: 0, // Would need additional calculation
+            pending: Math.max(0, totalOrderAmount - totalReceived),
+            totalOrderValue: totalOrderAmount, // Add this field
           };
 
           // Build payments by day chart data (last 7 days)

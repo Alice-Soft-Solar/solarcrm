@@ -1,10 +1,36 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient, verifyUserAndGetProfile, hasRole } from '@/lib/supabase-server';
 import { sendWhatsAppMessage } from '@/utils/whatsapp';
+
+/**
+ * API Route: Create Payment
+ * 
+ * Security: RLS enforced + Server-side verification
+ * - Uses authenticated client with RLS enforcement
+ * - Verifies user identity and company from database
+ * - Only allows users to create payments for their own company's work orders
+ */
 
 export async function POST(request: NextRequest) {
   try {
+    // Step 1: Create authenticated Supabase client (uses cookies/JWT)
+    const supabase = await createServerClient(request);
+
+    // Step 2: Verify user and get verified profile/role from database
+    const { userId, companyId, roleName } = await verifyUserAndGetProfile(supabase, request);
+
+    // Step 3: Check authorization - only certain roles can create payments
+    const allowedRoles = ['Admin', 'Super Admin', 'Accounts'];
+    if (!hasRole(roleName, allowedRoles)) {
+      return NextResponse.json(
+        { error: 'Unauthorized: You do not have permission to create payments' },
+        { status: 403 }
+      );
+    }
+
+    // Step 4: Parse request body
     const body = await request.json();
+
     const {
       work_order_id,
       amount,
@@ -15,14 +41,14 @@ export async function POST(request: NextRequest) {
       second_payment,
       final_payment,
       additional_payment,
-      company_id,
-      user_id,
+      cheque_number,
+      bank_name,
     } = body;
 
-    // Validate required fields
-    if (!work_order_id || !amount || !transaction_date || !company_id || !user_id) {
+    // Step 5: Validate required fields (company_id no longer needed from request)
+    if (!work_order_id || !amount || !transaction_date) {
       return NextResponse.json(
-        { error: 'Missing required fields: work_order_id, amount, transaction_date, company_id, user_id' },
+        { error: 'Missing required fields: work_order_id, amount, transaction_date' },
         { status: 400 }
       );
     }
@@ -45,25 +71,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    // Step 6: Check if work order exists and belongs to user's company (RLS enforced)
 
-    if (!supabaseServiceKey) {
-      return NextResponse.json(
-        { error: 'Service role key not configured' },
-        { status: 500 }
-      );
-    }
-
-    // Use service role key to bypass RLS
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
-
-    // First, check if work order exists
     const { data: workOrder, error: workOrderError } = await supabase
       .from('work_orders')
       .select('id, order_amount, company_id')
@@ -102,8 +111,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify work order belongs to the user's company
-    if (workOrder.company_id !== company_id) {
-      console.error(`Company ID mismatch: Work order company_id=${workOrder.company_id}, User company_id=${company_id}, Work order ID=${work_order_id}`);
+    if (workOrder.company_id !== companyId) {
+      console.error(`Company ID mismatch: Work order company_id=${workOrder.company_id}, User company_id=${companyId}, Work order ID=${work_order_id}`);
       return NextResponse.json(
         { error: 'This work order does not belong to your company' },
         { status: 403 }
@@ -152,11 +161,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create payment record
+    // Step 7: Create payment record with RLS enforcement
+    // RLS policy ensures payment is created with authenticated user's company_id
     const { data: paymentData, error: paymentError } = await supabase
       .from('payments_data')
       .insert({
-        company_id,
+        company_id: companyId, // Use verified company ID from authenticated user
         work_order_id: work_order_id,
         amount: paymentAmount,
         transaction_date,
@@ -166,15 +176,18 @@ export async function POST(request: NextRequest) {
         second_payment: second_payment || null,
         final_payment: final_payment || null,
         additional_payment: additional_payment || null,
+        cheque_number: cheque_number || null,
+        bank_name: bank_name || null,
       })
       .select()
       .single();
+
 
     if (paymentError) {
       console.error('Error creating payment:', paymentError);
       console.error('Payment insert details:', {
         work_order_id,
-        company_id,
+        company_id: companyId,
         amount: paymentAmount,
         error_code: paymentError.code,
         error_message: paymentError.message,
@@ -208,6 +221,58 @@ export async function POST(request: NextRequest) {
     const orderAmount = parseFloat(workOrder.order_amount);
     const paymentPercentage = (newTotalPaid / orderAmount) * 100;
 
+    // Check if this is the first payment (no existing payments before this one)
+    // If so, update work order status to "Advance Paid"
+    const isFirstPayment = !existingPayments || existingPayments.length === 0;
+    if (isFirstPayment) {
+      const { error: statusUpdateError } = await supabase
+        .from('work_orders')
+        .update({ work_order_status: 'Advance Paid' })
+        .eq('id', work_order_id);
+      
+      if (statusUpdateError) {
+        console.error('Error updating work order status to Advance Paid:', statusUpdateError);
+      } else {
+        console.log('✅ Work order status updated to Advance Paid');
+      }
+    }
+
+    // ====================
+    // PAYMENT RECEIVED NOTIFICATIONS  
+    // ====================
+    // Send payment confirmation notifications to customer and stakeholders
+    // This runs for ALL payments (non-blocking, best-effort)
+    (async () => {
+      try {
+        const { notifyPaymentReceived } = await import('@/utils/whatsapp-notifier');
+        
+        // Re-fetch full work order details for notifications
+        const { data: fullWorkOrder } = await supabase
+          .from('work_orders')
+          .select('*')
+          .eq('id', work_order_id)
+          .single();
+
+        if (!fullWorkOrder) {
+          console.warn('⚠️ Could not fetch work order for payment notifications');
+          return;
+        }
+
+        // Send payment received notifications
+        await notifyPaymentReceived(
+          fullWorkOrder as any,
+          paymentAmount,
+          newTotalPaid,
+          supabase as any
+        );
+      } catch (error) {
+        console.error('Error sending payment received notifications:', error);
+      }
+    })();
+
+    // ====================
+    // TO BE DISPATCHED NOTIFICATIONS
+    // ====================
     // Check if payment reached 65% and status should be "To Be Dispatched"
     // The database trigger should handle the status update, but we'll check and trigger WhatsApp
     const shouldBeDispatched = orderAmount > 0 && newTotalPaid >= orderAmount * 0.65;
@@ -224,9 +289,10 @@ export async function POST(request: NextRequest) {
 
     // If status changed to "To Be Dispatched", send WhatsApp notifications
     if (shouldBeDispatched && currentWorkOrder?.work_order_status === 'To Be Dispatched') {
-      // Send notifications asynchronously205ms205ms205ms (non-blocking)
+      // Send notifications asynchronously (non-blocking)
       (async () => {
         try {
+          // Use authenticated supabase client for fetching profiles
           // Re-fetch full work order details
           const { data: fullWorkOrder } = await supabase
             .from('work_orders')

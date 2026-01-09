@@ -21,7 +21,7 @@ export const formatDate = (dateString: string): string => {
 
 export const getPaymentTypeLabel = (paymentType: string): string => {
   const typeMap: Record<string, string> = {
-    'first_payment': 'First Payment',
+    'first_payment': 'First Payment (Advance)',
     'second_payment': 'Second Payment',
     'final_payment': 'Final Payment',
     'additional_payment': 'Additional Payment',

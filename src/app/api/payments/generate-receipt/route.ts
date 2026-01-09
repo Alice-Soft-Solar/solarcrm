@@ -1,44 +1,52 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient, verifyUserAndGetProfile, hasRole } from '@/lib/supabase-server';
 import React from 'react';
 import { pdf, DocumentProps } from '@react-pdf/renderer';
 import { ReceiptTemplate } from '@/components/ReceiptTemplate';
+import { notifyPaymentReceipt } from '@/utils/whatsapp-notifier';
+
+/**
+ * API Route: Generate Payment Receipt
+ * 
+ * Security: RLS enforced + Server-side verification
+ * - Uses authenticated client with RLS enforcement for data fetching
+ * - Service client used ONLY for storage upload (bucket permissions)
+ * - RLS ensures payment belongs to user's company
+ */
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { payment_id, company_id } = body;
+    // Step 1: Create authenticated Supabase client
+    const supabase = await createServerClient(request);
 
-    if (!payment_id || !company_id) {
+    // Step 2: Verify user and get verified profile/role
+    const { userId, companyId, roleName } = await verifyUserAndGetProfile(supabase, request);
+
+    // Step 3: Check authorization
+    const allowedRoles = ['Admin', 'Super Admin', 'Accounts'];
+    if (!hasRole(roleName, allowedRoles)) {
       return NextResponse.json(
-        { error: 'Missing required fields: payment_id, company_id' },
+        { error: 'Unauthorized: You do not have permission to generate receipts' },
+        { status: 403 }
+      );
+    }
+
+    // Step 4: Parse request body
+    const body = await request.json();
+    const { payment_id } = body;
+
+    if (!payment_id) {
+      return NextResponse.json(
+        { error: 'Missing required field: payment_id' },
         { status: 400 }
       );
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseServiceKey) {
-      return NextResponse.json(
-        { error: 'Service role key not configured' },
-        { status: 500 }
-      );
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
-
-    // Fetch payment details
+    // Step 5: Fetch payment details with RLS enforcement
     const { data: payment, error: paymentError } = await supabase
       .from('payments_data')
       .select('*')
       .eq('id', payment_id)
-      .eq('company_id', company_id)
       .single();
 
     if (paymentError || !payment) {
@@ -48,7 +56,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Fetch work order details
+    // Step 6: Fetch work order details with RLS enforcement
     const { data: workOrder, error: workOrderError } = await supabase
       .from('work_orders')
       .select('*')
@@ -62,11 +70,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Fetch company details with all required fields for receipt
+    // Step 7: Fetch company details with RLS enforcement
     const { data: company, error: companyError } = await supabase
       .from('companies')
       .select('name, company_address, company_phone1, company_phone2, company_email, gst_no')
-      .eq('id', company_id)
+      .eq('id', companyId)
       .single();
 
     if (companyError || !company) {
@@ -77,12 +85,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get all payments for this work order to calculate totals
+    // Step 8: Get all payments for this work order with RLS enforcement
     const { data: allPayments, error: allPaymentsError } = await supabase
       .from('payments_data')
       .select('amount')
-      .eq('work_order_id', payment.work_order_id)
-      .eq('company_id', company_id);
+      .eq('work_order_id', payment.work_order_id);
 
     if (allPaymentsError) {
       console.error('Error fetching all payments:', allPaymentsError);
@@ -106,13 +113,13 @@ export async function POST(request: NextRequest) {
     else if (payment.final_payment) paymentType = 'final_payment';
     else if (payment.additional_payment) paymentType = 'additional_payment';
 
-    // Generate receipt number if not exists
+    // Step 9: Generate receipt number if not exists
     let receiptNumber = payment.receipt_number;
     if (!receiptNumber) {
       const currentYear = new Date().getFullYear();
       const prefix = `REC-${currentYear}-`;
 
-      // Get the last receipt number for this year
+      // Get the last receipt number for this year with RLS enforcement
       const { data: lastReceipt, error: lastReceiptError } = await supabase
         .from('payments_data')
         .select('receipt_number')
@@ -135,7 +142,7 @@ export async function POST(request: NextRequest) {
       receiptNumber = `${prefix}${sequence.toString().padStart(4, '0')}`;
     }
 
-    // Prepare receipt data with company details from database
+    // Step 10: Prepare receipt data
     const receiptData = {
       receiptNumber,
       receiptDate: payment.receipt_generated_at || payment.created_at || new Date().toISOString(),
@@ -149,30 +156,28 @@ export async function POST(request: NextRequest) {
       amount: parseFloat(payment.amount) || 0,
       paymentMethod: payment.payment_method || 'bank_transfer',
       bankName: payment.bank_name || '',
-      chequeNo: payment.cheque_no || '',
+      chequeNo: payment.cheque_number || '',
       status: payment.status || 'Completed',
       orderValue: orderAmount ?? 0,
       totalReceived: totalPaid ?? 0,
       balanceAmount: pendingAmount ?? 0,
     };
 
-    // Guard: Ensure data is valid before PDF generation
     if (!receiptData || !receiptData.receiptNumber) {
       throw new Error('Receipt data missing');
     }
 
-    // Generate PDF
+    // Step 11: Generate PDF
     const ReceiptElement = React.createElement(ReceiptTemplate, { data: receiptData });
     const pdfDoc = pdf(ReceiptElement as React.ReactElement<DocumentProps>);
 
-    // Convert to buffer
     const blob = await pdfDoc.toBlob();
     const arrayBuffer = await blob.arrayBuffer();
     const pdfBuffer = Buffer.from(arrayBuffer);
 
-    // Upload PDF to Supabase Storage
+    // Step 12: Upload PDF to storage (requires service client for bucket access)
     const fileName = `${receiptNumber}.pdf`;
-    const filePath = `${company_id}/receipts/${fileName}`;
+    const filePath = `${companyId}/receipts/${fileName}`;
 
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('work-order-docs')
@@ -190,11 +195,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Store the file path (not public URL) since bucket is private
-    // We'll generate signed URLs when needed for viewing/downloading
     const pdfUrl = filePath;
 
-    // Update payment record with receipt details
+    // Step 13: Update payment record with RLS enforcement
     const { data: updatedPayment, error: updateError } = await supabase
       .from('payments_data')
       .update({
@@ -214,6 +217,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ⭐ Integrated WhatsApp Receipt Sharing
+    // Fire-and-forget notification to avoid delaying the response
+    (async () => {
+      try {
+        await notifyPaymentReceipt(
+          workOrder as any, // Cast to ExtendedWorkOrder
+          receiptNumber,
+          pdfUrl,
+          supabase
+        );
+      } catch (err) {
+        console.error('[WhatsApp Notification Error]:', err);
+      }
+    })();
+
     return NextResponse.json({
       success: true,
       receipt: {
@@ -224,10 +242,17 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: unknown) {
     console.error('API Error generating receipt:', error);
+    
+    if (error instanceof Error && error.message?.includes('Unauthorized')) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 401 }
+      );
+    }
+    
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'An error occurred while generating receipt' },
       { status: 500 }
     );
   }
 }
-

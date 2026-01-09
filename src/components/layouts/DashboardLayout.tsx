@@ -1,11 +1,11 @@
 'use client';
 
-import { createClient } from '@supabase/supabase-js';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState, useMemo, ReactNode } from 'react';
 import { Button, LoadingSpinner } from '../ui';
 import AppDrawer from '../navigation/AppDrawer';
 import { isSalesRole, isAdminRole, isSalesLeadRole, ROLES, RoleName } from '@/constants/roles';
+import { getSupabaseClient } from '@/lib/supabase-client';
 
 interface Profile {
   id: string;
@@ -40,9 +40,7 @@ export default function DashboardLayout({
   // Check if we're on a leads page (new or view)
   const isLeadsPage = pathname?.includes('/dashboard/leads');
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  const supabase = useMemo(() => createClient(supabaseUrl, supabaseKey), [supabaseUrl, supabaseKey]);
+  const supabase = useMemo(() => getSupabaseClient(), []);
 
   useEffect(() => {
     if (!requireAuth) {
@@ -136,10 +134,10 @@ export default function DashboardLayout({
   // Menu items for app drawer
   const menuItems = [
     // Work Orders - Different access for different roles
-    // Inventory & Accounts: ONLY "View Work Orders" (no create)
+    // Inventory, Accounts & BackOffice: ONLY "View Work Orders" (no create)
     // Sales Lead & Sales: Both "View" and "Create" (see only their own work orders)
     // Admin & Super Admin: Both "View" and "Create" (see all company work orders)
-    ...(roleName === ROLES.INVENTORY || roleName === 'Accounts'
+    ...(roleName === ROLES.INVENTORY || roleName === 'Accounts' || roleName === 'BackOffice'
       ? [
         {
           title: 'View All Work Orders',
@@ -173,6 +171,20 @@ export default function DashboardLayout({
           },
         ]
         : []),
+    // Quotations - Available to Sales, Sales Lead, Admin, Super Admin
+    ...((isSalesRole(roleName) || isSalesLeadRole(roleName) || isAdminRole(roleName))
+      ? [
+        {
+          title: 'Quotations',
+          href: '/dashboard/quotations',
+          icon: (
+            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          ),
+        },
+      ]
+      : []),
     // Lead management - Available to Sales, Sales Lead, Admin, Super Admin
     // Sales Lead ONLY sees these two items (Create Lead and View Leads)
     ...((isSalesRole(roleName) || isSalesLeadRole(roleName) || isAdminRole(roleName))
@@ -219,6 +231,16 @@ export default function DashboardLayout({
           ),
           roles: ['Admin', 'Super Admin'],
         },
+        {
+          title: 'Reports & Insights',
+          href: '/dashboard/reports',
+          icon: (
+            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+          ),
+          roles: ['Admin', 'Super Admin'],
+        },
       ]
       : []),
   ];
@@ -240,7 +262,7 @@ export default function DashboardLayout({
           lg:${sidebarOpen ? 'ml-72' : 'ml-0'}
         `}
       >
-        <nav className={`border-b border-border bg-white shadow-sm sticky top-0 z-40`}>
+        <nav className={`border-b border-border bg-white shadow-sm sticky top-0 z-30`}>
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="flex h-16 items-center justify-between">
               <div className="flex items-center gap-4">
@@ -312,4 +334,3 @@ export default function DashboardLayout({
     </div>
   );
 }
-

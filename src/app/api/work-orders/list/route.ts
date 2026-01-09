@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient, verifyUserAndGetProfile, hasRole, getServiceClient } from '@/lib/supabase-server';
+import { createServerClient, verifyUserAndGetProfile, hasRole } from '@/lib/supabase-server';
 
 /**
  * API route to fetch work orders list
@@ -12,14 +12,18 @@ import { createServerClient, verifyUserAndGetProfile, hasRole, getServiceClient 
 
 export async function POST(request: NextRequest) {
   try {
+    console.log('=== WORK ORDERS LIST API DEBUG START ===');
+    
     // Step 1: Create authenticated Supabase client (uses cookies)
     const supabase = await createServerClient(request);
+    console.log('[DEBUG 1] Supabase client created');
 
     // Step 2: Verify user and get verified profile/role from database
     const { userId, companyId, roleName } = await verifyUserAndGetProfile(supabase, request);
+    console.log('[DEBUG 2] User verified:', { userId, companyId, roleName });
 
     // Step 3: Check authorization - only specific roles can access work orders
-    const allowedRoles = ['Sales', 'salesLead', 'Admin', 'Super Admin', 'Inventory', 'Accounts'];
+    const allowedRoles = ['Sales', 'salesLead', 'Admin', 'Super Admin', 'Inventory', 'Accounts', 'BackOffice'];
     if (!hasRole(roleName, allowedRoles)) {
       return NextResponse.json(
         { error: 'Unauthorized: You do not have access to work orders' },
@@ -37,6 +41,47 @@ export async function POST(request: NextRequest) {
 
     const { page = 1, limit = 50 } = body;
 
+    // === DEBUG: Test if RLS functions work ===
+    console.log('[DEBUG 3] Testing RLS function via raw query...');
+    
+    // Test 0: Check if we can call the get_user_company_id function directly
+    try {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('get_user_company_id');
+      console.log('[DEBUG 3.1] get_user_company_id() result:', { 
+        data: rpcData, 
+        error: rpcError?.message,
+        hint: rpcError?.hint 
+      });
+    } catch (e) {
+      console.log('[DEBUG 3.1] get_user_company_id() call failed:', e);
+    }
+
+    // Test 0b: Check get_user_role_name function
+    try {
+      const { data: roleData, error: roleError } = await supabase.rpc('get_user_role_name');
+      console.log('[DEBUG 3.2] get_user_role_name() result:', { 
+        data: roleData, 
+        error: roleError?.message 
+      });
+    } catch (e) {
+      console.log('[DEBUG 3.2] get_user_role_name() call failed:', e);
+    }
+
+    // Test 1: Simple count without filters (to see if RLS allows ANY access)
+    const { count: totalCount, error: countError } = await supabase
+      .from('work_orders')
+      .select('*', { count: 'exact', head: true });
+    
+    console.log('[DEBUG 4] Simple count result:', { totalCount, countError: countError?.message });
+
+    // Test 2: Count with explicit company_id filter (bypassing RLS company check)
+    const { count: filteredCount, error: filteredError } = await supabase
+      .from('work_orders')
+      .select('*', { count: 'exact', head: true })
+      .eq('company_id', companyId);
+    
+    console.log('[DEBUG 5] Filtered count (with company_id):', { filteredCount, filteredError: filteredError?.message, companyId });
+
     // Step 5: Build query with RLS enforcement
     // Note: RLS policies automatically filter based on user's role and company
     // This manual filtering is an additional safety layer
@@ -49,6 +94,7 @@ export async function POST(request: NextRequest) {
         work_order_number,
         customer_name,
         customer_address,
+        town,
         customer_email,
         customer_phone,
         power_bill,
@@ -65,7 +111,12 @@ export async function POST(request: NextRequest) {
         created_at,
         company_id,
         sales_executive_id,
-        work_order_status
+        work_order_status,
+        erection_done_at,
+        meter_completed_at,
+        subsidy_amount,
+        subsidy_status,
+        warranty_approval
       `)
       .order('created_at', { ascending: false });
 
@@ -82,15 +133,37 @@ export async function POST(request: NextRequest) {
       // Sales see only their own work orders
       query = query.eq('sales_executive_id', userId);
     } else if (roleName === 'Inventory') {
-      // Inventory sees ONLY "To Be Dispatched" and "Dispatched" orders (NO NULL status)
+      // Inventory sees "To Be Dispatched" and "Dispatched" orders
       query = query.eq('company_id', companyId);
       query = query.or('work_order_status.eq.To Be Dispatched,work_order_status.eq.Dispatched');
+    } else if (roleName === 'BackOffice') {
+      // BackOffice sees work orders from "Dispatched" onwards (post-dispatch processing)
+      query = query.eq('company_id', companyId);
+      query = query.in('work_order_status', [
+        'Dispatched',
+        'Erection and Installation',
+        'Dept. Submission of Docs',
+        'Meter Installation',
+        'Subsidy Ready for Redemption',
+        'Customer Eligible for Redemption',
+        'Subsidy Follow Up',
+        'Subsidy Received by Customer',
+        'Online Mobile App Demo to Customer',
+        'Tata Sales Force Upload',
+        'Warranty Certificate Approval',
+        'Warranty Rejected',
+        'Warranty Certificate Given to Customer',
+        'Successfully Completed'
+      ]);
     } else if (isAdmin || roleName === 'Accounts') {
       // Admin and Accounts see all company work orders
       query = query.eq('company_id', companyId);
     }
 
+    console.log('[DEBUG 6] Executing main query for role:', roleName);
     const { data, error } = await query;
+    console.log('[DEBUG 7] Query result:', { rowCount: data?.length || 0, error: error?.message });
+    console.log('=== WORK ORDERS LIST API DEBUG END ===');
 
     if (error) {
       console.error('Error fetching work orders:', error);
@@ -154,9 +227,8 @@ export async function POST(request: NextRequest) {
           const validSalesExecIds = salesExecIds.filter((id: any) => id && typeof id === 'string' && id.length > 0);
 
           if (validSalesExecIds.length > 0) {
-            // Use service client to bypass RLS for profile lookup (same as leads route)
-            const serviceClient = getServiceClient();
-            const { data: profilesData, error: profilesError } = await serviceClient
+            // Use authenticated supabase client for profile lookup (RLS enforced)
+            const { data: profilesData, error: profilesError } = await supabase
               .from('profiles')
               .select('id, full_name')
               .in('id', validSalesExecIds);
@@ -236,78 +308,33 @@ export async function POST(request: NextRequest) {
       }));
 
       // For Inventory role: Show "To Be Dispatched" and "Dispatched" orders
-      // IMPORTANT: Trust database status - if status is "To Be Dispatched" in DB, it was already verified
-      // The query at line 84 already filters for these statuses, so we trust what comes from DB
-      // Only verify payment for NULL status orders that were calculated to be "To Be Dispatched" (from statusMap)
       if (roleName === 'Inventory') {
-        // Track which orders have status from database vs calculated
-        const originalDataMap = new Map(data.map((d: any) => [d.id, d.work_order_status]));
+        transformedData = transformedData.filter((order: any) =>
+          order.work_order_status === 'To Be Dispatched' || order.work_order_status === 'Dispatched'
+        );
+      }
 
-        // Separate orders: DB status (trusted) vs calculated status (needs verification)
-        const ordersNeedingVerification = transformedData.filter((order: any) => {
-          // If status is "To Be Dispatched" but wasn't in original DB query, it's calculated
-          return order.work_order_status === 'To Be Dispatched' &&
-            originalDataMap.get(order.id) !== 'To Be Dispatched';
-        });
-
-        // Only verify payment for calculated "To Be Dispatched" orders
-        if (ordersNeedingVerification.length > 0) {
-          const calculatedIds = ordersNeedingVerification.map((o: any) => o.id);
-
-          const { data: paymentsData } = await supabase
-            .from('payments_data')
-            .select('work_order_id, first_payment, second_payment, final_payment, additional_payment')
-            .in('work_order_id', calculatedIds);
-
-          if (paymentsData && paymentsData.length > 0) {
-            const paymentsByWorkOrder: Record<string, number> = {};
-            paymentsData.forEach((payment: any) => {
-              const workOrderId = payment.work_order_id;
-              if (!paymentsByWorkOrder[workOrderId]) {
-                paymentsByWorkOrder[workOrderId] = 0;
-              }
-              paymentsByWorkOrder[workOrderId] += parseFloat(payment.first_payment || 0);
-              paymentsByWorkOrder[workOrderId] += parseFloat(payment.second_payment || 0);
-              paymentsByWorkOrder[workOrderId] += parseFloat(payment.final_payment || 0);
-              paymentsByWorkOrder[workOrderId] += parseFloat(payment.additional_payment || 0);
-            });
-
-            // Filter: Include all "Dispatched", all DB "To Be Dispatched" (trusted), and verified calculated "To Be Dispatched"
-            transformedData = transformedData.filter((order: any) => {
-              if (order.work_order_status === 'Dispatched') {
-                return true; // Always include "Dispatched"
-              }
-              if (order.work_order_status === 'To Be Dispatched') {
-                // If it came from DB, trust it (already verified)
-                if (originalDataMap.get(order.id) === 'To Be Dispatched') {
-                  return true;
-                }
-                // If calculated, verify payment >= 65%
-                const totalPaid = paymentsByWorkOrder[order.id] || 0;
-                const orderAmount = parseFloat(order.order_amount?.toString() || '0');
-                return orderAmount > 0 && totalPaid >= orderAmount * 0.65;
-              }
-              return false;
-            });
-          } else {
-            // No payment data - trust DB status, filter out unverified calculated orders
-            transformedData = transformedData.filter((order: any) => {
-              if (order.work_order_status === 'Dispatched') {
-                return true;
-              }
-              if (order.work_order_status === 'To Be Dispatched') {
-                // Only include if it came from DB (trusted)
-                return originalDataMap.get(order.id) === 'To Be Dispatched';
-              }
-              return false;
-            });
-          }
-        } else {
-          // No calculated orders - show all "To Be Dispatched" and "Dispatched" (all from DB, trusted)
-          transformedData = transformedData.filter((order: any) =>
-            order.work_order_status === 'Dispatched' || order.work_order_status === 'To Be Dispatched'
-          );
-        }
+      // For BackOffice role: Show work orders from "Dispatched" onwards
+      if (roleName === 'BackOffice') {
+        const backOfficeStatuses = [
+          'Dispatched',
+          'Erection and Installation',
+          'Dept. Submission of Docs',
+          'Meter Installation',
+          'Subsidy Ready for Redemption',
+          'Customer Eligible for Redemption',
+          'Subsidy Follow Up',
+          'Subsidy Received by Customer',
+          'Online Mobile App Demo to Customer',
+          'Tata Sales Force Upload',
+          'Warranty Certificate Approval',
+          'Warranty Rejected',
+          'Warranty Certificate Given to Customer',
+          'Successfully Completed'
+        ];
+        transformedData = transformedData.filter((order: any) =>
+          order.work_order_status && backOfficeStatuses.includes(order.work_order_status)
+        );
       }
     }
 
@@ -322,6 +349,24 @@ export async function POST(request: NextRequest) {
     } else if (roleName === 'Inventory') {
       countQuery = countQuery.eq('company_id', companyId);
       countQuery = countQuery.or('work_order_status.eq.To Be Dispatched,work_order_status.eq.Dispatched');
+    } else if (roleName === 'BackOffice') {
+      countQuery = countQuery.eq('company_id', companyId);
+      countQuery = countQuery.in('work_order_status', [
+        'Dispatched',
+        'Erection and Installation',
+        'Dept. Submission of Docs',
+        'Meter Installation',
+        'Subsidy Ready for Redemption',
+        'Customer Eligible for Redemption',
+        'Subsidy Follow Up',
+        'Subsidy Received by Customer',
+        'Online Mobile App Demo to Customer',
+        'Tata Sales Force Upload',
+        'Warranty Certificate Approval',
+        'Warranty Rejected',
+        'Warranty Certificate Given to Customer',
+        'Successfully Completed'
+      ]);
     } else if (isAdmin || roleName === 'Accounts') {
       countQuery = countQuery.eq('company_id', companyId);
     }

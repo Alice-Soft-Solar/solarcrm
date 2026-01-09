@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui';
 
 export interface LeadFormData {
@@ -67,6 +67,8 @@ export default function LeadForm({
 
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationStatus, setLocationStatus] = useState<string>('📍 Fetching location...');
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const locationFetchedRef = useRef(false); // Track if location was already fetched
 
   // Update form when initialData changes (for edit mode)
   useEffect(() => {
@@ -182,35 +184,34 @@ export default function LeadForm({
 
   // Auto-fetch location on mount - triggers native browser permission dialog
   useEffect(() => {
-    console.log('Location useEffect running...', { isEditMode, latitude: form.latitude, longitude: form.longitude });
-    
-    if (isEditMode) {
-      console.log('Edit mode - skipping location capture');
+    // Skip if already fetched or in edit mode
+    if (locationFetchedRef.current || isEditMode) {
       return;
     }
     
     // Check if location is already captured (non-empty strings)
     if (form.latitude && form.longitude && form.latitude.trim() !== '' && form.longitude.trim() !== '') {
       console.log('Location already captured:', { lat: form.latitude, lng: form.longitude });
+      locationFetchedRef.current = true;
       return;
     }
 
     console.log('Setting up auto-location capture...');
     console.log('navigator.geolocation available:', !!navigator.geolocation);
     
+    // Mark as fetched to prevent re-running
+    locationFetchedRef.current = true;
+    
     // Small delay to ensure page is fully loaded and interactive
-    // This ensures the browser permission dialog can be displayed
     const timer = setTimeout(() => {
-      console.log('Auto-triggering location capture - browser dialog should appear now');
-      console.log('About to call fetchLocation()...');
+      console.log('Auto-triggering location capture');
       fetchLocation();
-    }, 500); // 500ms delay for mobile browsers
+    }, 500);
 
     return () => {
-      console.log('Cleaning up location timer');
       clearTimeout(timer);
     };
-  }, [isEditMode, fetchLocation]); // Removed form.latitude/longitude from deps to prevent re-triggering
+  }, [isEditMode, fetchLocation, form.latitude, form.longitude]);
 
   const handlePhotoClick = () => {
     const input = document.getElementById('lead-photo-input') as HTMLInputElement | null;
@@ -226,13 +227,59 @@ export default function LeadForm({
     }
   };
 
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+    
+    if (!isEditMode) {
+      // Required fields in create mode (except referrer)
+      if (!form.customer_name.trim()) {
+        errors.customer_name = 'Customer name is required';
+      }
+      if (!form.mobile_number.trim() || form.mobile_number.length !== 10) {
+        errors.mobile_number = 'Valid 10-digit mobile number is required';
+      }
+      if (!form.power_bill.trim()) {
+        errors.power_bill = 'Power bill is required';
+      }
+      if (!form.units.trim()) {
+        errors.units = 'Power units is required';
+      }
+      if (!form.address.trim()) {
+        errors.address = 'Address is required';
+      }
+      if (!form.latitude.trim() || !form.longitude.trim()) {
+        errors.location = 'Location is required. Please allow location access.';
+      }
+      if (isAdmin && !form.executive_id) {
+        errors.executive_id = 'Please select an executive';
+      }
+    }
+    
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!validateForm()) {
+      // Scroll to first error
+      const firstErrorField = document.querySelector('.border-red-500');
+      if (firstErrorField) {
+        firstErrorField.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      return;
+    }
+    
     onSubmit(form, null);
   };
 
   const handleChange = (field: keyof LeadFormData, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
+    // Clear validation error when user starts typing
+    if (validationErrors[field]) {
+      setValidationErrors(prev => ({ ...prev, [field]: '' }));
+    }
   };
 
   // Determine visit status field rendering
@@ -313,41 +360,49 @@ export default function LeadForm({
 
       <div className="space-y-1">
         <label className="block text-sm font-medium text-foreground">
-          {isEditMode ? 'Customer Name' : '2. Customer Name'}
+          {isEditMode ? 'Customer Name' : '2. Customer Name'} {!isEditMode && <span className="text-red-500">*</span>}
         </label>
         <input
           type="text"
-          required={!isEditMode}
           value={form.customer_name}
           onChange={(e) => handleChange('customer_name', e.target.value)}
           placeholder="John Doe"
-          className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-foreground"
+          className={`block w-full rounded-md border px-3 py-2 text-sm text-foreground ${
+            validationErrors.customer_name ? 'border-red-500 bg-red-50' : 'border-border bg-white'
+          }`}
           disabled={isEditMode && !isAdmin}
         />
+        {validationErrors.customer_name && (
+          <p className="text-xs text-red-500">{validationErrors.customer_name}</p>
+        )}
       </div>
 
       <div className="space-y-1">
         <label className="block text-sm font-medium text-foreground">
-          {isEditMode ? 'Customer Phone' : '3. Mobile Number'}
+          {isEditMode ? 'Customer Phone' : '3. Mobile Number'} {!isEditMode && <span className="text-red-500">*</span>}
         </label>
         <input
           type="tel"
-          required={!isEditMode}
           value={form.mobile_number}
           onChange={(e) =>
             handleChange('mobile_number', e.target.value.replace(/[^0-9]/g, '').slice(0, 10))
           }
           placeholder="10-digit mobile (e.g. 9876543210)"
           maxLength={10}
-          className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-foreground"
+          className={`block w-full rounded-md border px-3 py-2 text-sm text-foreground ${
+            validationErrors.mobile_number ? 'border-red-500 bg-red-50' : 'border-border bg-white'
+          }`}
           disabled={isEditMode && !isAdmin}
         />
+        {validationErrors.mobile_number && (
+          <p className="text-xs text-red-500">{validationErrors.mobile_number}</p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1">
           <label className="block text-sm font-medium text-foreground">
-            {isEditMode ? 'Power Bill' : '4. Power Bill (₹)'}
+            {isEditMode ? 'Power Bill' : '4. Power Bill (₹)'} {!isEditMode && <span className="text-red-500">*</span>}
           </label>
           <input
             type="number"
@@ -356,13 +411,18 @@ export default function LeadForm({
             value={form.power_bill}
             onChange={(e) => handleChange('power_bill', e.target.value)}
             placeholder="320.50"
-            className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-foreground"
+            className={`block w-full rounded-md border px-3 py-2 text-sm text-foreground ${
+              validationErrors.power_bill ? 'border-red-500 bg-red-50' : 'border-border bg-white'
+            }`}
             disabled={isEditMode && !isAdmin}
           />
+          {validationErrors.power_bill && (
+            <p className="text-xs text-red-500">{validationErrors.power_bill}</p>
+          )}
         </div>
         <div className="space-y-1">
           <label className="block text-sm font-medium text-foreground">
-            {isEditMode ? 'Power Units' : '5. Units (kWh)'}
+            {isEditMode ? 'Power Units' : '5. Units (kWh)'} {!isEditMode && <span className="text-red-500">*</span>}
           </label>
           <input
             type="number"
@@ -371,24 +431,34 @@ export default function LeadForm({
             value={form.units}
             onChange={(e) => handleChange('units', e.target.value)}
             placeholder="280"
-            className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-foreground"
+            className={`block w-full rounded-md border px-3 py-2 text-sm text-foreground ${
+              validationErrors.units ? 'border-red-500 bg-red-50' : 'border-border bg-white'
+            }`}
             disabled={isEditMode && !isAdmin}
           />
+          {validationErrors.units && (
+            <p className="text-xs text-red-500">{validationErrors.units}</p>
+          )}
         </div>
       </div>
 
       <div className="space-y-1">
         <label className="block text-sm font-medium text-foreground">
-          {isEditMode ? 'Address' : '6. Address'}
+          {isEditMode ? 'Address' : '6. Address'} {!isEditMode && <span className="text-red-500">*</span>}
         </label>
         <textarea
           rows={2}
           value={form.address}
           onChange={(e) => handleChange('address', e.target.value)}
           placeholder="Street, City, State"
-          className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-foreground"
+          className={`block w-full rounded-md border px-3 py-2 text-sm text-foreground ${
+            validationErrors.address ? 'border-red-500 bg-red-50' : 'border-border bg-white'
+          }`}
           disabled={isEditMode && !isAdmin}
         />
+        {validationErrors.address && (
+          <p className="text-xs text-red-500">{validationErrors.address}</p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -405,6 +475,7 @@ export default function LeadForm({
             <option value="Not Interested">Not Interested</option>
             <option value="Reference">Reference</option>
             <option value="Follow Up Required">Follow Up Required</option>
+            <option value="Closed">Closed</option>
           </select>
         </div>
         {renderVisitStatusField()}
@@ -470,26 +541,44 @@ export default function LeadForm({
           </div>
 
           <div className="space-y-1">
-            <label className="block text-sm font-medium text-foreground">12. Location Coordinates</label>
+            <label className="block text-sm font-medium text-foreground">12. Location Coordinates <span className="text-red-500">*</span></label>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <input
                 type="text"
                 readOnly
                 value={form.latitude}
                 placeholder="Latitude"
-                className="block w-full rounded-md border border-border bg-zinc-50 px-3 py-2 text-sm text-foreground cursor-not-allowed"
+                className={`block w-full rounded-md border px-3 py-2 text-sm text-foreground cursor-not-allowed ${
+                  validationErrors.location ? 'border-red-500 bg-red-50' : 'border-border bg-zinc-50'
+                }`}
               />
               <input
                 type="text"
                 readOnly
                 value={form.longitude}
                 placeholder="Longitude"
-                className="block w-full rounded-md border border-border bg-zinc-50 px-3 py-2 text-sm text-foreground cursor-not-allowed"
+                className={`block w-full rounded-md border px-3 py-2 text-sm text-foreground cursor-not-allowed ${
+                  validationErrors.location ? 'border-red-500 bg-red-50' : 'border-border bg-zinc-50'
+                }`}
               />
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {locationStatus}
+            <p className={`mt-1 text-xs ${validationErrors.location ? 'text-red-500' : 'text-muted-foreground'}`}>
+              {validationErrors.location || locationStatus}
             </p>
+            {!form.latitude && !form.longitude && !locationLoading && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  locationFetchedRef.current = false;
+                  fetchLocation();
+                }}
+                className="mt-2"
+              >
+                🔄 Retry Location
+              </Button>
+            )}
           </div>
         </>
       )}

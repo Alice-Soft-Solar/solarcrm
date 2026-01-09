@@ -7,6 +7,7 @@ import DashboardLayout from '@/components/layouts/DashboardLayout';
 import { LoadingSpinner } from '@/components/ui';
 import LeadForm, { LeadFormData } from '@/components/leads/LeadForm';
 import { getAccessToken } from '@/lib/supabase-client';
+import { compressImage, isCompressibleImage } from '@/utils/compressImage';
 
 interface Profile {
   id: string;
@@ -89,7 +90,7 @@ export default function NewLeadPage() {
           roles: Array.isArray(roles) ? roles : [roles],
         });
 
-        // Fetch executives via API route to bypass RLS and ensure proper data fetching
+        // Fetch executives via API route to ensure proper data fetching
         if (currentRoleName === 'Admin' || currentRoleName === 'Super Admin' || currentRoleName === 'salesLead') {
           try {
             const accessToken = getAccessToken();
@@ -135,11 +136,30 @@ export default function NewLeadPage() {
     init();
   }, [router, supabase]);
 
-  const handlePhotoChange = (file: File | null) => {
-    setPhotoFile(file);
+  const handlePhotoChange = async (file: File | null) => {
     if (file) {
-      setPhotoPreview(URL.createObjectURL(file));
+      // Validate file size (10MB limit before compression)
+      const maxSize = 10 * 1024 * 1024;
+      if (file.size > maxSize) {
+        alert('File size exceeds 10MB limit. Please use a smaller photo.');
+        return;
+      }
+
+      // Compress image before storing
+      let processedFile = file;
+      if (isCompressibleImage(file)) {
+        try {
+          processedFile = await compressImage(file);
+        } catch (compressionError) {
+          console.warn('Image compression failed, using original:', compressionError);
+          // Continue with original file if compression fails
+        }
+      }
+
+      setPhotoFile(processedFile);
+      setPhotoPreview(URL.createObjectURL(processedFile));
     } else {
+      setPhotoFile(null);
       setPhotoPreview(null);
     }
   };
@@ -214,13 +234,9 @@ export default function NewLeadPage() {
       // Redirect based on role:
       // - Admin/Super Admin/Sales Lead: Go to success page first, then they can navigate to view leads
       // - Sales: Direct redirect to view leads (no success page)
-      if (isAdmin || isSalesLead) {
-        const leadId = json.lead?.id || '';
-        router.push(`/dashboard/leads/success?leadId=${leadId}`);
-      } else {
-        // Sales role: direct redirect to view leads
-      router.push('/dashboard/leads');
-      }
+      // Always redirect to success page for better user feedback
+      const leadId = json.lead?.id || '';
+      router.push(`/dashboard/leads/success?leadId=${leadId}`);
     } catch (err: unknown) {
       console.error('Unexpected error creating lead:', err);
       alert(err instanceof Error ? err.message : 'Unexpected error creating lead');

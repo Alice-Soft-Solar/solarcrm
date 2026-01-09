@@ -2,7 +2,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { Button, Input, Card } from '@/components/ui';
 
@@ -44,6 +44,23 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  // Clear any stale invalid sessions on mount to prevent "Invalid Refresh Token" errors
+  useEffect(() => {
+    const clearStaleSession = async () => {
+      try {
+        const { error } = await supabase.auth.getSession();
+        if (error?.message?.includes('Refresh Token')) {
+          console.log('Clearing stale session...');
+          await supabase.auth.signOut();
+        }
+      } catch (e) {
+        // Silently fail and clear
+        await supabase.auth.signOut();
+      }
+    };
+    clearStaleSession();
+  }, [supabase]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">

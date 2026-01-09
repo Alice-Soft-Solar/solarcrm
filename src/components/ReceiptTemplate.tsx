@@ -53,7 +53,7 @@ export const ReceiptTemplate = ({ data }: ReceiptTemplateProps) => {
         </View>
 
         {/* Title */}
-        <Text style={styles.title}>BANK RECEIPT</Text>
+        <Text style={styles.title}>RECEIPT</Text>
 
         {/* Main Receipt Box */}
         <View style={styles.receiptBox}>
@@ -119,9 +119,7 @@ export const ReceiptTemplate = ({ data }: ReceiptTemplateProps) => {
           <View style={styles.footer}>
             <Text style={styles.printedOn}>Printed on :   {printedDate}   {printedTime}</Text>
             <Text style={styles.summary}>
-              A/c Summary (Incl. this Receipt) : Order Value : {formatCurrency(data.orderValue)}     
-              Received : {formatCurrency(data.totalReceived)}     
-              Balance : {formatCurrency(data.balanceAmount)}
+              A/c Summary(Incl. this Receipt): Order Value: {formatCurrency(data.orderValue)}  Received: {formatCurrency(data.totalReceived)}  Balance: {formatCurrency(data.balanceAmount)}
             </Text>
           </View>
         </View>

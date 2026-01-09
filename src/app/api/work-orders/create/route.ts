@@ -1,11 +1,36 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient, verifyUserAndGetProfile, hasRole } from '@/lib/supabase-server';
 import { sendWhatsAppMessage } from '@/utils/whatsapp';
 import { getCustomerCreationMessage, getAdminCreationMessage } from '@/utils/whatsapp-templates';
 import { getAdminUsers, getSalesExecutive, sendWhatsAppToUser, sendWhatsAppToUsers } from '@/utils/whatsapp-helpers';
 
+/**
+ * API Route: Create Work Order
+ * 
+ * Security: RLS enforced + Server-side verification
+ * - Uses authenticated client with RLS enforcement
+ * - Verifies user identity and company from database
+ * - Only allows users to create work orders for their own company
+ */
+
 export async function POST(request: NextRequest) {
   try {
+    // Step 1: Create authenticated Supabase client (uses cookies/JWT)
+    const supabase = await createServerClient(request);
+
+    // Step 2: Verify user and get verified profile/role from database
+    const { userId, companyId, roleName } = await verifyUserAndGetProfile(supabase, request);
+
+    // Step 3: Check authorization - only certain roles can create work orders
+    const allowedRoles = ['Sales', 'salesLead', 'Admin', 'Super Admin'];
+    if (!hasRole(roleName, allowedRoles)) {
+      return NextResponse.json(
+        { error: 'Unauthorized: You do not have permission to create work orders' },
+        { status: 403 }
+      );
+    }
+
+    // Step 4: Parse request body
     const body = await request.json();
     const {
       company_id,
@@ -13,6 +38,7 @@ export async function POST(request: NextRequest) {
       work_order_number,
       customer_name,
       customer_address,
+      town,
       customer_email,
       customer_phone,
       power_bill,
@@ -28,15 +54,15 @@ export async function POST(request: NextRequest) {
       cancelled_check_url,
     } = body;
 
-    // Validate required fields
-    if (!company_id || !sales_executive_id || !work_order_number || !customer_name || !customer_address || !customer_phone || !order_amount) {
+    // Step 5: Validate required fields
+    if (!sales_executive_id || !work_order_number || !customer_name || !customer_address || !town || !customer_phone || !order_amount) {
       return NextResponse.json(
-        { error: 'Missing required fields. Please provide: company_id, sales_executive_id, work_order_number, customer_name, customer_address, customer_phone, and order_amount' },
+        { error: 'Missing required fields. Please provide: sales_executive_id, work_order_number, customer_name, customer_address, town, customer_phone, and order_amount' },
         { status: 400 }
       );
     }
 
-    // Validate email format if provided (for future use)
+    // Step 6: Validate field formats
     if (typeof work_order_number !== 'string' || work_order_number.trim().length === 0) {
       return NextResponse.json(
         { error: 'Work order number must be a non-empty string' },
@@ -51,25 +77,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseServiceKey) {
+    // Step 7: Verify company_id matches authenticated user's company (security check)
+    if (company_id && company_id !== companyId) {
       return NextResponse.json(
-        { error: 'Service role key not configured' },
-        { status: 500 }
+        { error: 'Unauthorized: Cannot create work orders for other companies' },
+        { status: 403 }
       );
     }
 
-    // Use service role key to bypass RLS
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
-
-    // Convert order_amount to number
+    // Step 8: Convert order_amount to number
     const orderAmount = parseFloat(order_amount);
     if (isNaN(orderAmount)) {
       return NextResponse.json(
@@ -78,15 +94,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Insert work order
+    // Step 9: Insert work order with RLS enforcement (uses verified companyId)
+    // RLS policy ensures work order is created with authenticated user's company_id
     const { data, error } = await supabase
       .from('work_orders')
       .insert({
-        company_id,
+        company_id: companyId, // Use verified company ID from authenticated user
         sales_executive_id,
         work_order_number,
         customer_name,
         customer_address,
+        town,
         customer_email: customer_email || null,
         customer_phone,
         power_bill: power_bill || null,
@@ -96,12 +114,14 @@ export async function POST(request: NextRequest) {
         roof_type: roof_type || null,
         plant_capacity: plant_capacity || null,
         order_amount: orderAmount,
+        work_order_status: 'Created',
         aadhaar_url: aadhaar_url || null,
         pan_url: pan_url || null,
         bank_statement_url: bank_statement_url || null,
         cancelled_check_url: cancelled_check_url || null,
       })
       .select();
+
 
     if (error) {
       console.error('Error creating work order:', error);
@@ -113,14 +133,16 @@ export async function POST(request: NextRequest) {
 
     const workOrder = data?.[0];
 
-    // Send WhatsApp notifications (non-blocking - don't fail if this fails)
+    // Step 10: Send WhatsApp notifications (non-blocking - don't fail if this fails)
+    // Use service client for fetching admin/sales exec profiles (cross-company data)
     if (workOrder) {
       try {
+        // Use authenticated supabase client for fetching profiles
         // Fetch sales executive details
         const salesExecutive = await getSalesExecutive(sales_executive_id, supabase as any);
         
         // Fetch admin users
-        const adminUsers = await getAdminUsers(company_id, supabase as any);
+        const adminUsers = await getAdminUsers(companyId, supabase as any);
 
         // Get payment received (initially 0 for new work order)
         const paymentReceived = 0;
@@ -183,6 +205,7 @@ export async function POST(request: NextRequest) {
         console.error('Error sending WhatsApp notifications:', whatsappError);
       }
     }
+
 
     return NextResponse.json({
       success: true,

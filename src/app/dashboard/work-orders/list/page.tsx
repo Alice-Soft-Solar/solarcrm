@@ -7,12 +7,14 @@ import Link from 'next/link';
 import PageHeader from '@/components/PageHeader';
 import { LoadingSpinner, Button } from '@/components/ui';
 import { getAccessToken } from '@/lib/supabase-client';
+import { compressImage, isCompressibleImage } from '@/utils/compressImage';
 
 interface WorkOrder {
   id: string;
   work_order_number: string;
   customer_name: string;
   customer_address: string;
+  town: string | null;
   customer_email: string | null;
   customer_phone: string;
   power_bill: number | null;
@@ -33,6 +35,11 @@ interface WorkOrder {
   sales_executive_name?: string;
   status?: string;
   work_order_status: string | null;
+  warranty_approval?: string | null;
+  subsidy_amount?: number | null;
+  subsidy_status?: string | null;
+  erection_done_at?: string | null;
+  meter_completed_at?: string | null;
 }
 
 interface Payment {
@@ -46,6 +53,8 @@ interface Payment {
   second_payment: number | null;
   final_payment: number | null;
   additional_payment: number | null;
+  cheque_number?: string | null;
+  bank_name?: string | null;
   created_at: string;
   receipt_number?: string | null;
   pdf_url?: string | null;
@@ -92,6 +101,7 @@ export default function WorkOrdersListPage() {
     work_order_number: '',
     customer_name: '',
     customer_address: '',
+    town: '',
     customer_email: '',
     customer_phone: '',
     power_bill: '',
@@ -131,6 +141,49 @@ export default function WorkOrdersListPage() {
   const [deletingWorkOrder, setDeletingWorkOrder] = useState<WorkOrder | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  // BackOffice modal state (used by Admin, Super Admin, and BackOffice roles)
+  const [isBackOfficeModalOpen, setIsBackOfficeModalOpen] = useState(false);
+  const [backOfficeEditingWorkOrder, setBackOfficeEditingWorkOrder] = useState<WorkOrder | null>(null);
+  const [backOfficeLoading, setBackOfficeLoading] = useState(false);
+  const [backOfficeFormData, setBackOfficeFormData] = useState({
+    customer_name: '',
+    customer_email: '',
+    customer_phone: '',
+    customer_address: '',
+    town: '',
+    order_amount: '',
+    plant_capacity: '',
+    structure_height: '',
+    roof_type: '',
+    power_bill: '',
+    power_units: '',
+    site_details: '',
+    work_order_status: '',
+    subsidy_amount: '',
+    subsidy_status: '',
+    erection_done_at: '',
+    meter_completed_at: '',
+    warranty_approval: '',
+    aadhaar_url: '',
+    pan_url: '',
+    bank_statement_url: '',
+    cancelled_check_url: '',
+  });
+  const [backOfficeDocumentUploading, setBackOfficeDocumentUploading] = useState({
+    aadhaar: false,
+    pan: false,
+    bank_statement: false,
+    cancelled_check: false,
+  });
+  const [backOfficeDocumentErrors, setBackOfficeDocumentErrors] = useState({
+    aadhaar: null as string | null,
+    pan: null as string | null,
+    bank_statement: null as string | null,
+    cancelled_check: null as string | null,
+  });
+  const [formErrors, setFormErrors] = useState<Record<string, boolean>>({});
+
+
   // Payments state
   const [payments, setPayments] = useState<Payment[]>([]);
   const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null);
@@ -147,20 +200,52 @@ export default function WorkOrdersListPage() {
     second_payment: '',
     final_payment: '',
     additional_payment: '',
+    cheque_number: '',
+    bank_name: '',
   });
   const [paymentType, setPaymentType] = useState<string>('');
   const [paymentFormLoading, setPaymentFormLoading] = useState(false);
   const [generatingReceipt, setGeneratingReceipt] = useState<string | null>(null);
   const [markingDispatched, setMarkingDispatched] = useState(false);
 
+  // Success modal state
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+
+  // Notification modal state (replaces browser alerts)
+  const [notificationModal, setNotificationModal] = useState<{
+    isOpen: boolean;
+    type: 'success' | 'error' | 'info';
+    title: string;
+    message: string;
+  }>({ isOpen: false, type: 'info', title: '', message: '' });
+
+  const showNotification = (type: 'success' | 'error' | 'info', title: string, message: string) => {
+    setNotificationModal({ isOpen: true, type, title, message });
+  };
+
+  const closeNotification = () => {
+    setNotificationModal({ ...notificationModal, isOpen: false });
+  };
+
   // Ledger PDF generation state
   const [generatingLedger, setGeneratingLedger] = useState(false);
   const [generatingSalesExecLedger, setGeneratingSalesExecLedger] = useState(false);
+
+  // Dues Report PDF generation state
+  const [duesReportFromDate, setDuesReportFromDate] = useState('');
+  const [duesReportToDate, setDuesReportToDate] = useState('');
+  const [generatingDuesReport, setGeneratingDuesReport] = useState(false);
+
+  // To Be Dispatched PDF generation state
+  const [toBeDispatchedFromDate, setToBeDispatchedFromDate] = useState('');
+  const [toBeDispatchedToDate, setToBeDispatchedToDate] = useState('');
+  const [generatingToBeDispatched, setGeneratingToBeDispatched] = useState(false);
 
   // Dispatch confirmation state
   const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
   const [dispatchingWorkOrder, setDispatchingWorkOrder] = useState<WorkOrder | null>(null);
   const [dispatchLoading, setDispatchLoading] = useState(false);
+
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -208,10 +293,10 @@ export default function WorkOrdersListPage() {
         const currentRoleName = Array.isArray(roles) ? roles[0]?.role_name : roles?.role_name;
 
         // Check authorization
-        const allowedRoles = ['Sales', 'salesLead', 'Admin', 'Super Admin', 'Inventory', 'Accounts'];
+        const allowedRoles = ['Sales', 'salesLead', 'Admin', 'Super Admin', 'Inventory', 'Accounts', 'BackOffice'];
         if (!currentRoleName || !allowedRoles.includes(currentRoleName)) {
           if (isMounted) {
-            alert('You do not have permission to view work orders.');
+            showNotification('error', 'Access Denied', 'You do not have permission to view work orders.');
             router.push('/dashboard');
           }
           return;
@@ -243,7 +328,7 @@ export default function WorkOrdersListPage() {
           console.error('Network error fetching work orders:', networkError);
           if (isMounted) {
             setWorkOrders([]);
-            alert('Network error: Failed to connect to server. Please check your internet connection and try again.');
+            showNotification('error', 'Network Error', 'Failed to connect to server. Please check your internet connection and try again.');
           }
           return;
         }
@@ -259,7 +344,7 @@ export default function WorkOrdersListPage() {
           console.error('Error fetching work orders:', errorMessage);
           if (isMounted) {
             setWorkOrders([]);
-            alert(`Error loading work orders: ${errorMessage}`);
+            showNotification('error', 'Error', `Error loading work orders: ${errorMessage}`);
           }
           return;
         }
@@ -271,7 +356,7 @@ export default function WorkOrdersListPage() {
           console.error('Error parsing response:', parseError);
           if (isMounted) {
             setWorkOrders([]);
-            alert('Error parsing server response. Please try again.');
+            showNotification('error', 'Error', 'Error parsing server response. Please try again.');
           }
           return;
         }
@@ -284,10 +369,10 @@ export default function WorkOrdersListPage() {
       } catch (error: unknown) {
         if (error instanceof Error) {
           console.error('Error in fetchData:', error.message);
-          alert(`An error occurred: ${error.message}`);
+          showNotification('error', 'Error', error.message);
         } else {
           console.error('Unknown error in fetchData:', error);
-          alert('An error occurred. Please try again.');
+          showNotification('error', 'Error', 'An error occurred. Please try again.');
         }
       } finally {
         if (isMounted) {
@@ -368,6 +453,30 @@ export default function WorkOrdersListPage() {
   useEffect(() => {
     let filtered = [...allWorkOrders];
 
+    // For BackOffice role, only show work orders with 'Dispatched' status or later
+    // (statuses that come after Dispatched in the workflow)
+    if (roleName === 'BackOffice') {
+      const backOfficeVisibleStatuses = [
+        'Dispatched',
+        'Erection and Installation',
+        'Dept. Submission of Docs',
+        'Meter Installation',
+        'Subsidy Ready for Redemption',
+        'Customer Eligible for Redemption',
+        'Subsidy Follow Up',
+        'Subsidy Received by Customer',
+        'Online Mobile App Demo to Customer',
+        'Tata Sales Force Upload',
+        'Warranty Certificate Approval',
+        'Warranty Rejected',
+        'Warranty Certificate Given to Customer',
+        'Successfully Completed'
+      ];
+      filtered = filtered.filter(order => 
+        order.work_order_status && backOfficeVisibleStatuses.includes(order.work_order_status)
+      );
+    }
+
     // Apply search query (searches across multiple fields)
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase().trim();
@@ -403,7 +512,7 @@ export default function WorkOrdersListPage() {
     }
 
     setWorkOrders(filtered);
-  }, [searchQuery, filterCompany, filterSalesExecutive, filterPlantCapacity, allWorkOrders]);
+  }, [searchQuery, filterCompany, filterSalesExecutive, filterPlantCapacity, allWorkOrders, roleName]);
 
   const clearFilters = () => {
     setSearchQuery('');
@@ -444,14 +553,17 @@ export default function WorkOrdersListPage() {
         }),
       });
 
-      const result = await response.json();
-
-      if (response.ok) {
-        setPayments(result.payments || []);
-        setPaymentSummary(result.paymentSummary || null);
-      } else {
-        console.error('Error fetching payments:', result.error);
+      // IMPORTANT: Check response.ok BEFORE consuming the body
+      // This prevents 'Body is unusable: Body has already been read' error
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error fetching payments:', errorText);
+        return;
       }
+
+      const result = await response.json();
+      setPayments(result.payments || []);
+      setPaymentSummary(result.paymentSummary || null);
     } catch (error) {
       console.error('Error fetching payments:', error);
     } finally {
@@ -470,18 +582,18 @@ export default function WorkOrdersListPage() {
   const handleAddPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedWorkOrder || !profile || !user) {
-      alert('Missing required information. Please refresh the page and try again.');
+      showNotification('error', 'Error', 'Missing required information. Please refresh the page and try again.');
       return;
     }
 
     // Validate work order has required fields
     if (!selectedWorkOrder.id) {
-      alert('Invalid work order. Please refresh the page and try again.');
+      showNotification('error', 'Error', 'Invalid work order. Please refresh the page and try again.');
       return;
     }
 
     if (!profile.company_id) {
-      alert('Your account is missing company information. Please contact support.');
+      showNotification('error', 'Error', 'Your account is missing company information. Please contact support.');
       return;
     }
 
@@ -492,18 +604,18 @@ export default function WorkOrdersListPage() {
         user_company_id: profile.company_id,
         work_order_id: selectedWorkOrder.id,
       });
-      alert('This work order does not belong to your company. Please refresh the page.');
+      showNotification('error', 'Error', 'This work order does not belong to your company. Please refresh the page.');
       return;
     }
 
     // Validate payment type and amount
     if (!paymentType) {
-      alert('Please select a payment type');
+      showNotification('error', 'Validation Error', 'Please select a payment type');
       return;
     }
 
     if (!paymentFormData.amount || parseFloat(paymentFormData.amount) <= 0) {
-      alert('Please enter a valid payment amount');
+      showNotification('error', 'Validation Error', 'Please enter a valid payment amount');
       return;
     }
 
@@ -516,6 +628,8 @@ export default function WorkOrdersListPage() {
       status: paymentFormData.status,
       company_id: profile.company_id,
       user_id: user.id,
+      cheque_number: paymentFormData.payment_method === 'cheque' ? (paymentFormData.cheque_number || null) : null,
+      bank_name: (paymentFormData.payment_method === 'bank_transfer' || paymentFormData.payment_method === 'cheque') ? (paymentFormData.bank_name || null) : null,
     };
 
     // Set the amount in the selected payment type column
@@ -537,12 +651,17 @@ export default function WorkOrdersListPage() {
 
     setPaymentFormLoading(true);
     try {
+      const accessToken = getAccessToken();
       const response = await fetch('/api/payments/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
         },
-        body: JSON.stringify(paymentData),
+        body: JSON.stringify({
+          ...paymentData,
+          ...(accessToken && { access_token: accessToken }),
+        }),
       });
 
       const result = await response.json();
@@ -551,7 +670,7 @@ export default function WorkOrdersListPage() {
         throw new Error(result.error || 'Failed to create payment');
       }
 
-      alert('Payment added successfully!');
+      showNotification('success', 'Success!', 'Payment added successfully!');
       setIsAddPaymentModalOpen(false);
       setPaymentFormData({
         amount: '',
@@ -562,6 +681,8 @@ export default function WorkOrdersListPage() {
         second_payment: '',
         final_payment: '',
         additional_payment: '',
+        cheque_number: '',
+        bank_name: '',
       });
       setPaymentType('');
 
@@ -611,10 +732,16 @@ export default function WorkOrdersListPage() {
     } catch (error: unknown) {
       if (error instanceof Error) {
         console.error('Error adding payment:', error.message);
-        alert(`Error: ${error.message}`);
+        
+        // Handle specific "exceeds balance" error gracefully
+        if (error.message.includes('Payment amount exceeds remaining balance')) {
+          showNotification('info', 'Payment Limit Reached', error.message);
+        } else {
+          showNotification('error', 'Error', error.message);
+        }
       } else {
         console.error('Unknown error adding payment:', error);
-        alert('Error: Something went wrong');
+        showNotification('error', 'Error', 'Something went wrong');
       }
     } finally {
       setPaymentFormLoading(false);
@@ -623,20 +750,23 @@ export default function WorkOrdersListPage() {
 
   const handleGenerateReceipt = async (paymentId: string) => {
     if (!profile?.company_id) {
-      alert('Company information not found');
+      showNotification('error', 'Error', 'Company information not found');
       return;
     }
 
     setGeneratingReceipt(paymentId);
     try {
+      const accessToken = getAccessToken();
       const response = await fetch('/api/payments/generate-receipt', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
         },
         body: JSON.stringify({
           payment_id: paymentId,
           company_id: profile.company_id,
+          ...(accessToken && { access_token: accessToken }),
         }),
       });
 
@@ -646,7 +776,7 @@ export default function WorkOrdersListPage() {
         throw new Error(result.error || 'Failed to generate receipt');
       }
 
-      alert('Receipt generated successfully!');
+      showNotification('success', 'Success!', 'Receipt generated successfully!');
 
       // Refresh payments to get updated receipt info
       if (selectedWorkOrder) {
@@ -655,10 +785,10 @@ export default function WorkOrdersListPage() {
     } catch (error: unknown) {
       if (error instanceof Error) {
         console.error('Error generating receipt:', error.message);
-        alert(`Error: ${error.message}`);
+        showNotification('error', 'Error', error.message);
       } else {
         console.error('Unknown error generating receipt:', error);
-        alert('Error: Something went wrong');
+        showNotification('error', 'Error', 'Something went wrong');
       }
     } finally {
       setGeneratingReceipt(null);
@@ -749,10 +879,12 @@ export default function WorkOrdersListPage() {
 
     setPaymentFormLoading(true);
     try {
+      const accessToken = getAccessToken();
       const response = await fetch('/api/payments/update', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
         },
         body: JSON.stringify({
           payment_id: editingPayment.id,
@@ -764,7 +896,10 @@ export default function WorkOrdersListPage() {
           second_payment: paymentFormData.second_payment || null,
           final_payment: paymentFormData.final_payment || null,
           additional_payment: paymentFormData.additional_payment || null,
+          cheque_number: paymentFormData.payment_method === 'cheque' ? (paymentFormData.cheque_number || null) : null,
+          bank_name: (paymentFormData.payment_method === 'bank_transfer' || paymentFormData.payment_method === 'cheque') ? (paymentFormData.bank_name || null) : null,
           company_id: profile.company_id,
+          ...(accessToken && { access_token: accessToken }),
         }),
       });
 
@@ -918,6 +1053,11 @@ export default function WorkOrdersListPage() {
       return false;
     }
 
+    // BackOffice can edit all work orders (but only status/subsidy fields via separate modal)
+    if (roleName === 'BackOffice') {
+      return true;
+    }
+
     // Admin and Super Admin can edit any work order in their company
     if (roleName === 'Admin' || roleName === 'Super Admin') {
       return true;
@@ -948,19 +1088,31 @@ export default function WorkOrdersListPage() {
 
     setMarkingDispatched(true);
     try {
-      const accessToken = getAccessToken();
+      // Get access token from Supabase session (more reliable than localStorage)
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        throw new Error('No active session. Please refresh the page and try again.');
+      }
+      
+      const accessToken = session.access_token;
+      
+      const requestHeaders = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      };
+      
+      const requestBody = {
+        access_token: accessToken,
+        work_order_id: selectedWorkOrder.id,
+        user_id: user.id,
+        company_id: profile.company_id,
+      };
+      
       const response = await fetch('/api/work-orders/mark-dispatched', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
-        },
-        body: JSON.stringify({
-          ...(accessToken && { access_token: accessToken }),
-          work_order_id: selectedWorkOrder.id,
-          user_id: user.id,
-          company_id: profile.company_id,
-        }),
+        headers: requestHeaders,
+        body: JSON.stringify(requestBody),
       });
 
       const result = await response.json();
@@ -1021,8 +1173,8 @@ export default function WorkOrdersListPage() {
   const canDelete = (order: WorkOrder): boolean => {
     if (!user || !roleName) return false;
 
-    // Inventory and Accounts have read-only access
-    if (roleName === 'Inventory' || roleName === 'Accounts') {
+    // Inventory, Accounts, and BackOffice have read-only access (cannot delete)
+    if (roleName === 'Inventory' || roleName === 'Accounts' || roleName === 'BackOffice') {
       return false;
     }
 
@@ -1030,16 +1182,25 @@ export default function WorkOrdersListPage() {
     return roleName === 'Admin' || roleName === 'Super Admin';
   };
 
+
   const openEditModal = async (order: WorkOrder) => {
     if (!canEdit(order)) {
       alert('You do not have permission to edit this work order.');
       return;
     }
+
+    // BackOffice users get a different edit modal with only status/subsidy fields
+    if (roleName === 'BackOffice') {
+      openBackOfficeModal(order);
+      return;
+    }
+
     setEditingWorkOrder(order);
     setEditFormData({
       work_order_number: order.work_order_number,
       customer_name: order.customer_name,
       customer_address: order.customer_address,
+      town: order.town || '',
       customer_email: order.customer_email || '',
       customer_phone: order.customer_phone,
       power_bill: order.power_bill != null ? order.power_bill.toString() : '',
@@ -1107,7 +1268,7 @@ export default function WorkOrdersListPage() {
       return;
     }
 
-    const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+    const MAX_FILE_SIZE = 8 * 1024 * 1024; // 8MB (before compression)
     const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'application/pdf'];
 
     if (!ALLOWED_TYPES.includes(file.type)) {
@@ -1117,7 +1278,7 @@ export default function WorkOrdersListPage() {
     }
 
     if (file.size > MAX_FILE_SIZE) {
-      alert('File size exceeds 5MB limit.');
+      alert('File size exceeds 10MB limit. Please use a smaller file.');
       event.target.value = '';
       return;
     }
@@ -1126,6 +1287,17 @@ export default function WorkOrdersListPage() {
     setEditDocumentErrors(prev => ({ ...prev, [docType]: null }));
 
     try {
+      // Compress image files before upload
+      let fileToUpload = file;
+      if (isCompressibleImage(file)) {
+        try {
+          fileToUpload = await compressImage(file);
+        } catch (compressionError) {
+          console.warn('Image compression failed, uploading original:', compressionError);
+          // Continue with original file if compression fails
+        }
+      }
+
       const fileExtension = file.name.split('.').pop()?.toLowerCase() || 'pdf';
       const timestamp = Date.now();
       const fileName = `${docType}-${timestamp}.${fileExtension}`;
@@ -1133,7 +1305,7 @@ export default function WorkOrdersListPage() {
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('work-order-docs')
-        .upload(filePath, file, {
+        .upload(filePath, fileToUpload, {
           upsert: true,
           cacheControl: '3600',
         });
@@ -1172,6 +1344,86 @@ export default function WorkOrdersListPage() {
     }
   };
 
+  const handleBackOfficeDocumentUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+    docType: 'aadhaar' | 'pan' | 'bank_statement' | 'cancelled_check'
+  ) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!profile?.company_id) {
+      alert('Company ID not found. Cannot upload document.');
+      return;
+    }
+
+    const MAX_FILE_SIZE = 8 * 1024 * 1024; // 8MB (before compression)
+    const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'application/pdf'];
+
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      alert('Invalid file type. Only JPG, PNG, and PDF are allowed.');
+      event.target.value = '';
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE) {
+      alert('File size exceeds 8MB limit. Please use a smaller file.');
+      event.target.value = '';
+      return;
+    }
+
+    setBackOfficeDocumentUploading(prev => ({ ...prev, [docType]: true }));
+    setBackOfficeDocumentErrors(prev => ({ ...prev, [docType]: null }));
+
+    try {
+      // Compress image files before upload
+      let fileToUpload = file;
+      if (isCompressibleImage(file)) {
+        try {
+          fileToUpload = await compressImage(file);
+        } catch (compressionError) {
+          console.warn('Image compression failed, uploading original:', compressionError);
+        }
+      }
+
+      const fileExtension = file.name.split('.').pop()?.toLowerCase() || 'pdf';
+      const timestamp = Date.now();
+      const fileName = `${docType}-${timestamp}.${fileExtension}`;
+      const filePath = `${profile.company_id}/temp/${fileName}`;
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('work-order-docs')
+        .upload(filePath, fileToUpload, {
+          upsert: true,
+          cacheControl: '3600',
+        });
+
+      if (uploadError) {
+        throw new Error(`Failed to upload file: ${uploadError.message}`);
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('work-order-docs')
+        .getPublicUrl(filePath);
+
+      if (!urlData?.publicUrl) {
+        throw new Error('Failed to get public URL after upload');
+      }
+
+      // Update BackOffice form data with new URL
+      const fieldName = `${docType}_url` as 'aadhaar_url' | 'pan_url' | 'bank_statement_url' | 'cancelled_check_url';
+      setBackOfficeFormData(prev => ({ ...prev, [fieldName]: urlData.publicUrl }));
+
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Upload failed';
+      console.error(`Upload error for ${docType}:`, error);
+      setBackOfficeDocumentErrors(prev => ({ ...prev, [docType]: errorMessage }));
+    } finally {
+      setBackOfficeDocumentUploading(prev => ({ ...prev, [docType]: false }));
+      event.target.value = '';
+    }
+  };
+
+
   const closeEditModal = () => {
     setIsEditModalOpen(false);
     setEditingWorkOrder(null);
@@ -1179,6 +1431,7 @@ export default function WorkOrdersListPage() {
       work_order_number: '',
       customer_name: '',
       customer_address: '',
+      town: '',
       customer_email: '',
       customer_phone: '',
       power_bill: '',
@@ -1214,6 +1467,7 @@ export default function WorkOrdersListPage() {
 
     setEditLoading(true);
     try {
+      const accessToken = getAccessToken();
       // Format plant_capacity: if numeric, append "kW", otherwise store as-is
       const formattedPlantCapacity = editFormData.plant_capacity
         ? (editFormData.plant_capacity.trim() && !isNaN(parseFloat(editFormData.plant_capacity))
@@ -1225,11 +1479,13 @@ export default function WorkOrdersListPage() {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
         },
         body: JSON.stringify({
           work_order_id: editingWorkOrder.id,
           ...editFormData,
           plant_capacity: formattedPlantCapacity,
+          ...(accessToken && { access_token: accessToken }),
         }),
       });
 
@@ -1347,6 +1603,226 @@ export default function WorkOrdersListPage() {
     }
   };
 
+  // BackOffice modal functions
+  const openBackOfficeModal = (order: WorkOrder) => {
+    setBackOfficeEditingWorkOrder(order);
+    
+    // Helper to format date for HTML date input (YYYY-MM-DD)
+    const formatDateForInput = (dateValue: string | null | undefined): string => {
+      if (!dateValue) return '';
+      try {
+        const date = new Date(dateValue);
+        if (isNaN(date.getTime())) return '';
+        return date.toISOString().split('T')[0];
+      } catch {
+        return '';
+      }
+    };
+    
+    setBackOfficeFormData({
+      customer_name: order.customer_name || '',
+      customer_email: order.customer_email || '',
+      customer_phone: order.customer_phone || '',
+      customer_address: order.customer_address || '',
+      town: order.town || '',
+      order_amount: order.order_amount?.toString() || '',
+      plant_capacity: order.plant_capacity?.replace('kW', '').replace('KW', '') || '',
+      structure_height: order.structure_height || '',
+      roof_type: order.roof_type || '',
+      power_bill: order.power_bill?.toString() || '',
+      power_units: order.power_units?.toString() || '',
+      site_details: order.site_details || '',
+      work_order_status: order.work_order_status || '',
+      subsidy_amount: order.subsidy_amount?.toString() || '',
+      subsidy_status: order.subsidy_status || '',
+      erection_done_at: formatDateForInput(order.erection_done_at),
+      meter_completed_at: formatDateForInput(order.meter_completed_at),
+      warranty_approval: order.warranty_approval || '',
+      aadhaar_url: order.aadhaar_url || '',
+      pan_url: order.pan_url || '',
+      bank_statement_url: order.bank_statement_url || '',
+      cancelled_check_url: order.cancelled_check_url || '',
+    });
+    setIsBackOfficeModalOpen(true);
+  };
+
+  const closeBackOfficeModal = () => {
+    setIsBackOfficeModalOpen(false);
+    setBackOfficeEditingWorkOrder(null);
+    setBackOfficeFormData({
+      customer_name: '',
+      customer_email: '',
+      customer_phone: '',
+      customer_address: '',
+      town: '',
+      order_amount: '',
+      plant_capacity: '',
+      structure_height: '',
+      roof_type: '',
+      power_bill: '',
+      power_units: '',
+      site_details: '',
+      work_order_status: '',
+      subsidy_amount: '',
+      subsidy_status: '',
+      erection_done_at: '',
+      meter_completed_at: '',
+      warranty_approval: '',
+      aadhaar_url: '',
+      pan_url: '',
+      bank_statement_url: '',
+      cancelled_check_url: '',
+    });
+  };
+
+  const handleBackOfficeUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!backOfficeEditingWorkOrder) return;
+
+    // Validation for Admin updates
+    if (roleName === 'Admin' || roleName === 'Super Admin') {
+      const errors: Record<string, boolean> = {};
+      
+      if (!backOfficeFormData.customer_name?.trim()) errors.customer_name = true;
+      if (!backOfficeFormData.customer_address?.trim()) errors.customer_address = true;
+      if (!backOfficeFormData.town?.trim()) errors.town = true;
+      if (!backOfficeFormData.customer_phone?.trim()) errors.customer_phone = true;
+      if (!backOfficeFormData.order_amount) errors.order_amount = true;
+
+      if (Object.keys(errors).length > 0) {
+        setFormErrors(errors);
+        // Show gentle toast notification
+        showNotification('info', 'Required Fields', 'Please fill the highlighted fields.');
+        return;
+      }
+    }
+
+    setFormErrors({}); // Clear errors if valid
+    setBackOfficeLoading(true);
+    try {
+      const accessToken = getAccessToken();
+
+      // For Admin users, use full work order update API
+      if (roleName === 'Admin' || roleName === 'Super Admin') {
+        // Format plant capacity
+        const formattedPlantCapacity = backOfficeFormData.plant_capacity
+          ? (backOfficeFormData.plant_capacity.trim() && !isNaN(parseFloat(backOfficeFormData.plant_capacity))
+            ? `${backOfficeFormData.plant_capacity}kW`
+            : backOfficeFormData.plant_capacity)
+          : null;
+
+        const response = await fetch('/api/work-orders/update', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(accessToken && {'Authorization': `Bearer ${accessToken}`}),
+          },
+          body: JSON.stringify({
+            work_order_id: backOfficeEditingWorkOrder.id,
+            work_order_number: backOfficeEditingWorkOrder.work_order_number, // Add this required field
+            customer_name: backOfficeFormData.customer_name,
+            customer_email: backOfficeFormData.customer_email,
+            customer_phone: backOfficeFormData.customer_phone,
+            customer_address: backOfficeFormData.customer_address,
+            town: backOfficeFormData.town,
+            order_amount: backOfficeFormData.order_amount,
+            plant_capacity: formattedPlantCapacity,
+            structure_height: backOfficeFormData.structure_height,
+            roof_type: backOfficeFormData.roof_type,
+            power_bill: backOfficeFormData.power_bill,
+            power_units: backOfficeFormData.power_units,
+            site_details: backOfficeFormData.site_details,
+            work_order_status: backOfficeFormData.work_order_status,
+            subsidy_amount: backOfficeFormData.subsidy_amount,
+            subsidy_status: backOfficeFormData.subsidy_status,
+            erection_done_at: backOfficeFormData.erection_done_at,
+            meter_completed_at: backOfficeFormData.meter_completed_at,
+            aadhaar_url: backOfficeFormData.aadhaar_url,
+            pan_url: backOfficeFormData.pan_url,
+            bank_statement_url: backOfficeFormData.bank_statement_url,
+            cancelled_check_url: backOfficeFormData.cancelled_check_url,
+            ...(accessToken && { access_token: accessToken }),
+          }),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to update work order');
+        }
+      } else {
+        // For BackOffice users, use status update API
+        const response = await fetch('/api/work-orders/update-status', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+          },
+          body: JSON.stringify({
+            work_order_id: backOfficeEditingWorkOrder.id,
+            work_order_status: backOfficeFormData.work_order_status,
+            // Only send subsidy fields if they have values
+            ...(backOfficeFormData.subsidy_amount && { subsidy_amount: backOfficeFormData.subsidy_amount }),
+            ...(backOfficeFormData.subsidy_status && { subsidy_status: backOfficeFormData.subsidy_status }),
+            erection_done_at: backOfficeFormData.erection_done_at,
+            meter_completed_at: backOfficeFormData.meter_completed_at,
+            warranty_approval: backOfficeFormData.warranty_approval,
+            ...(accessToken && { access_token: accessToken }),
+          }),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to update work order status');
+        }
+      }
+
+      // Refresh work orders list
+      if (user && profile && roleName) {
+        const accessToken = getAccessToken();
+        const refreshResponse = await fetch('/api/work-orders/list', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+          },
+          body: JSON.stringify({
+            ...(accessToken && { access_token: accessToken }),
+            userId: user.id,
+            companyId: profile.company_id,
+            roleName: roleName,
+          }),
+        });
+
+        if (refreshResponse.ok) {
+          const refreshResult = await refreshResponse.json();
+          const orders = refreshResult.workOrders || [];
+          setAllWorkOrders(orders);
+          setWorkOrders(orders);
+        }
+      }
+
+      showNotification('success', 'Success!', 'Work order updated successfully!');
+      closeBackOfficeModal();
+      
+      // Close detail modal if open
+      if (isModalOpen) {
+        closeDetailModal();
+      }
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error('Error updating work order:', error.message);
+        showNotification('error', 'Error', error.message);
+      } else {
+        console.error('Unknown error updating work order:', error);
+        showNotification('error', 'Error', 'Something went wrong');
+      }
+    } finally {
+      setBackOfficeLoading(false);
+    }
+  };
+
   const openDispatchModal = (order: WorkOrder) => {
     if (order.work_order_status !== 'To Be Dispatched') {
       return;
@@ -1412,17 +1888,125 @@ export default function WorkOrdersListPage() {
     }
   };
 
+  // Handler for generating dues report PDF (Admin only)
+  const handleGenerateDuesReport = async () => {
+    if (!profile?.company_id || !user) {
+      alert('Missing required information. Please refresh the page.');
+      return;
+    }
+
+    setGeneratingDuesReport(true);
+    try {
+      const accessToken = getAccessToken();
+      const response = await fetch('/api/reports/dues-report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+        },
+        body: JSON.stringify({
+          ...(accessToken && { access_token: accessToken }),
+          company_id: profile.company_id,
+          user_id: user.id,
+          from_date: duesReportFromDate || null,
+          to_date: duesReportToDate || null,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to generate dues report');
+      }
+
+      // Download PDF
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const today = new Date().toISOString().split('T')[0];
+      link.download = `dues-report-${today}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error('Error generating dues report:', error.message);
+        alert(`Error: ${error.message}`);
+      } else {
+        console.error('Unknown error generating dues report:', error);
+        alert('Error: Failed to generate dues report PDF');
+      }
+    } finally {
+      setGeneratingDuesReport(false);
+    }
+  };
+
+  // Handler for generating To Be Dispatched PDF (Admin only)
+  const handleGenerateToBeDispatched = async () => {
+    if (!profile?.company_id || !user) {
+      alert('Missing required information. Please refresh the page.');
+      return;
+    }
+
+    setGeneratingToBeDispatched(true);
+    try {
+      const accessToken = getAccessToken();
+      const response = await fetch('/api/reports/to-be-dispatched', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+        },
+        body: JSON.stringify({
+          ...(accessToken && { access_token: accessToken }),
+          company_id: profile.company_id,
+          user_id: user.id,
+          from_date: toBeDispatchedFromDate || null,
+          to_date: toBeDispatchedToDate || null,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to generate To Be Dispatched report');
+      }
+
+      // Download PDF
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const today = new Date().toISOString().split('T')[0];
+      link.download = `to-be-dispatched-${today}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error('Error generating To Be Dispatched report:', error.message);
+        alert(`Error: ${error.message}`);
+      } else {
+        console.error('Unknown error generating To Be Dispatched report:', error);
+        alert('Error: Failed to generate To Be Dispatched report PDF');
+      }
+    } finally {
+      setGeneratingToBeDispatched(false);
+    }
+  };
+
   // Handler for generating sales executive ledger PDF
   const handleGenerateSalesExecLedger = async () => {
     if (!profile?.company_id || !user) {
-      alert('Missing required information. Please refresh the page.');
+      showNotification('error', 'Error', 'Missing required information. Please refresh the page.');
       return;
     }
 
     // For Admin/Super Admin: require sales executive filter selection
     if (roleName === 'Admin' || roleName === 'Super Admin') {
       if (!filterSalesExecutive) {
-        alert('Please select a sales executive from the filter dropdown first.');
+        showNotification('error', 'Validation Error', 'Please select a sales executive from the filter dropdown first.');
         return;
       }
 
@@ -1483,10 +2067,10 @@ export default function WorkOrdersListPage() {
     } catch (error: unknown) {
       if (error instanceof Error) {
         console.error('Error generating sales executive ledger:', error.message);
-        alert(`Error: ${error.message}`);
+        showNotification('error', 'Error', error.message);
       } else {
         console.error('Unknown error generating sales executive ledger:', error);
-        alert('Error: Failed to generate sales executive ledger PDF');
+        showNotification('error', 'Error', 'Failed to generate sales executive ledger PDF');
       }
     } finally {
       setGeneratingSalesExecLedger(false);
@@ -1498,12 +2082,23 @@ export default function WorkOrdersListPage() {
 
     setDispatchLoading(true);
     try {
+      // Get access token from Supabase session
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        throw new Error('No active session. Please refresh the page and try again.');
+      }
+      
+      const accessToken = session.access_token;
+      
       const response = await fetch('/api/work-orders/mark-dispatched', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
+          access_token: accessToken,
           work_order_id: dispatchingWorkOrder.id,
           user_id: user.id,
           company_id: profile.company_id,
@@ -1531,7 +2126,7 @@ export default function WorkOrdersListPage() {
       );
       setAllWorkOrders(updatedAllOrders);
 
-      alert('Work order marked as dispatched successfully! WhatsApp messages have been sent.');
+      setShowSuccessModal(true);
       closeDispatchModal();
 
       // Close detail modal if open and update it
@@ -1544,10 +2139,10 @@ export default function WorkOrdersListPage() {
     } catch (error: unknown) {
       if (error instanceof Error) {
         console.error('Error marking as dispatched:', error.message);
-        alert(`Error: ${error.message}`);
+        showNotification('error', 'Error', error.message);
       } else {
         console.error('Unknown error marking as dispatched:', error);
-        alert('Error: Something went wrong');
+        showNotification('error', 'Error', 'Something went wrong');
       }
     } finally {
       setDispatchLoading(false);
@@ -1565,6 +2160,7 @@ export default function WorkOrdersListPage() {
         rightAction={
           <>
             {/* Sales Executive Ledger Button - for Sales (always) or Admin (when filter selected) */}
+            {/* 
             {(roleName === 'Sales' || 
               ((roleName === 'Admin' || roleName === 'Super Admin') && filterSalesExecutive)) && (
               <Button
@@ -1579,7 +2175,9 @@ export default function WorkOrdersListPage() {
                   : (roleName === 'Sales' ? 'Generate My Ledger' : 'Generate Executive Ledger')}
               </Button>
             )}
+            */}
             {/* Admin Ledger Button - for Admin only */}
+            {/* 
             {(roleName === 'Admin' || roleName === 'Super Admin') && (
               <Button
                 onClick={handleGenerateLedger}
@@ -1591,7 +2189,8 @@ export default function WorkOrdersListPage() {
                 {generatingLedger ? 'Generating...' : 'Generate Ledger PDF'}
               </Button>
             )}
-            {roleName !== 'Inventory' && roleName !== 'Accounts' ? (
+            */}
+            {roleName !== 'Inventory' && roleName !== 'Accounts' && roleName !== 'BackOffice' ? (
               <Button
                 asLink
                 href="/dashboard/work-orders"
@@ -1619,6 +2218,26 @@ export default function WorkOrdersListPage() {
                 )}
               </p>
             </div>
+
+            {/* Admin Action Buttons - TEMPORARILY DISABLED */}
+            {/* {(roleName === 'Admin' || roleName === 'Super Admin') && (
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleGenerateToBeDispatched}
+                  disabled={generatingToBeDispatched}
+                  className="px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                >
+                  {generatingToBeDispatched ? 'Generating...' : 'To Be Dispatched'}
+                </button>
+                <button
+                  disabled
+                  className="px-4 py-2 bg-black text-white rounded-md opacity-50 cursor-not-allowed text-sm font-medium"
+                  title="Coming soon"
+                >
+                  Customer List
+                </button>
+              </div>
+            )} */}
           </div>
         </div>
 
@@ -1699,10 +2318,56 @@ export default function WorkOrdersListPage() {
           </div>
         </div>
 
+        {/* Dues Report Section (Admin Only) - TEMPORARILY DISABLED */}
+        {/* {(roleName === 'Admin' || roleName === 'Super Admin') && (
+          <div className="mb-6 rounded-lg border border-border bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-semibold text-foreground mb-3">Dues Report (Admin Only)</h3>
+            <div className="flex items-end gap-4">
+              <div>
+                <label htmlFor="dues-from-date" className="block text-xs font-medium text-foreground mb-1">
+                  From Date
+                </label>
+                <input
+                  id="dues-from-date"
+                  type="date"
+                  value={duesReportFromDate}
+                  onChange={(e) => setDuesReportFromDate(e.target.value)}
+                  className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
+                />
+              </div>
+              <div>
+                <label htmlFor="dues-to-date" className="block text-xs font-medium text-foreground mb-1">
+                  To Date
+                </label>
+                <input
+                  id="dues-to-date"
+                  type="date"
+                  value={duesReportToDate}
+                  onChange={(e) => setDuesReportToDate(e.target.value)}
+                  className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-200"
+                />
+              </div>
+              <div>
+                <Button
+                  onClick={handleGenerateDuesReport}
+                  disabled={generatingDuesReport}
+                  variant="primary"
+                  size="sm"
+                >
+                  {generatingDuesReport ? 'Generating...' : 'Download Dues PDF'}
+                </Button>
+              </div>
+            </div>
+            <p className="text-xs text-foreground opacity-60 mt-2">
+              Leave dates empty to generate report for ALL orders
+            </p>
+          </div>
+        )} */}
+
         {workOrders.length === 0 ? (
           <div className="rounded-lg border border-zinc-200 bg-white p-12 text-center">
             <p className="text-foreground opacity-70">No work orders found.</p>
-            {roleName !== 'Inventory' && roleName !== 'Accounts' && (
+            {roleName !== 'Inventory' && roleName !== 'Accounts' && roleName !== 'BackOffice' && (
               <Link
                 href="/dashboard/work-orders"
                 className="mt-4 inline-block rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-hover transition-colors"
@@ -1794,7 +2459,15 @@ export default function WorkOrdersListPage() {
                           </button>
                           {canEdit(order) && (
                             <button
-                              onClick={() => openEditModal(order)}
+                              onClick={() => {
+                                // Admin and Super Admin use BackOffice modal for status updates
+                                if (roleName === 'Admin' || roleName === 'Super Admin') {
+                                  openBackOfficeModal(order);
+                                } else {
+                                  // Other roles use regular edit modal
+                                  openEditModal(order);
+                                }
+                              }}
                               className="text-blue-600 hover:text-blue-700 transition-colors duration-150"
                               title="Edit Work Order"
                             >
@@ -1967,6 +2640,10 @@ export default function WorkOrdersListPage() {
                       <div>
                         <label className="block text-sm font-semibold text-[#1E1E1E] opacity-80 mb-1">Customer Address</label>
                         <p className="text-base text-[#1E1E1E] font-medium">{selectedWorkOrder.customer_address}</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-[#1E1E1E] opacity-80 mb-1">Town</label>
+                        <p className="text-base text-[#1E1E1E] font-medium">{selectedWorkOrder.town || 'N/A'}</p>
                       </div>
                       <div>
                         <label className="block text-sm font-semibold text-[#1E1E1E] opacity-80 mb-1">Customer Email</label>
@@ -2225,6 +2902,8 @@ export default function WorkOrdersListPage() {
                           second_payment: '',
                           final_payment: '',
                           additional_payment: '',
+                          cheque_number: '',
+                          bank_name: '',
                         });
                         setPaymentType('');
                         setIsAddPaymentModalOpen(true);
@@ -2302,6 +2981,8 @@ export default function WorkOrdersListPage() {
                                           second_payment: payment.second_payment?.toString() || '',
                                           final_payment: payment.final_payment?.toString() || '',
                                           additional_payment: payment.additional_payment?.toString() || '',
+                                          cheque_number: payment.cheque_number || '',
+                                          bank_name: payment.bank_name || '',
                                         });
                                         setIsEditPaymentModalOpen(true);
                                       }}
@@ -2551,6 +3232,20 @@ export default function WorkOrdersListPage() {
 
                   <div>
                     <label className="block text-sm font-medium text-[#1E1E1E]">
+                      Town <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editFormData.town}
+                      onChange={(e) => setEditFormData({ ...editFormData, town: e.target.value })}
+                      className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-[#1E1E1E]"
+                      placeholder="Enter town name"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-[#1E1E1E]">
                       Customer Email
                     </label>
                     <input
@@ -2621,45 +3316,59 @@ export default function WorkOrdersListPage() {
                     <label className="block text-sm font-medium text-[#1E1E1E]">
                       Structure Height
                     </label>
-                    <input
-                      type="text"
+                    <select
                       value={editFormData.structure_height}
                       onChange={(e) => setEditFormData({ ...editFormData, structure_height: e.target.value })}
                       className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-[#1E1E1E]"
-                    />
+                    >
+                      <option value="">Select height</option>
+                      <option value="3-4Ft">3-4Ft</option>
+                      <option value="6-7Ft">6-7Ft</option>
+                      <option value="8-10Ft">8-10Ft</option>
+                    </select>
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-[#1E1E1E]">
                       Roof Type
                     </label>
-                    <input
-                      type="text"
+                    <select
                       value={editFormData.roof_type}
                       onChange={(e) => setEditFormData({ ...editFormData, roof_type: e.target.value })}
                       className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-[#1E1E1E]"
-                    />
+                    >
+                      <option value="">Select roof type</option>
+                      <option value="Iron Shed">Iron Shed</option>
+                      <option value="RCC">RCC</option>
+                      <option value="Single Floor">Single Floor</option>
+                      <option value="Double Floor">Double Floor</option>
+                      <option value="Apartment">Apartment</option>
+                      <option value="Ground">Ground</option>
+                      <option value="Asbestos Sheet">Asbestos Sheet</option>
+                    </select>
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-[#1E1E1E]">
                       Plant Capacity
                     </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                    <select
                       value={editFormData.plant_capacity}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        // Only allow numeric input
-                        if (value === '' || /^\d*\.?\d*$/.test(value)) {
-                          setEditFormData({ ...editFormData, plant_capacity: value });
-                        }
-                      }}
+                      onChange={(e) => setEditFormData({ ...editFormData, plant_capacity: e.target.value })}
                       className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-[#1E1E1E]"
-                      placeholder="5, 10, etc."
-                    />
+                    >
+                      <option value="">Select capacity</option>
+                      <option value="1">1KW</option>
+                      <option value="2">2KW</option>
+                      <option value="3">3KW</option>
+                      <option value="4">4KW</option>
+                      <option value="5">5KW</option>
+                      <option value="6">6KW</option>
+                      <option value="7">7KW</option>
+                      <option value="8">8KW</option>
+                      <option value="9">9KW</option>
+                      <option value="10">10KW</option>
+                    </select>
                   </div>
 
                   <div className="md:col-span-2">
@@ -2962,7 +3671,7 @@ export default function WorkOrdersListPage() {
                         className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
                       >
                         <option value="">Select payment type</option>
-                        <option value="first_payment">First Payment</option>
+                        <option value="first_payment">First Payment (Advance)</option>
                         <option value="second_payment">Second Payment</option>
                         <option value="final_payment">Final Payment</option>
                         <option value="additional_payment">Additional Payment</option>
@@ -2981,7 +3690,7 @@ export default function WorkOrdersListPage() {
                             type="number"
                             step="0.01"
                             required
-                            value={paymentFormData.amount}
+                            value={paymentFormData.amount || ''}
                             onChange={(e) => setPaymentFormData({ ...paymentFormData, amount: e.target.value })}
                             className="block w-full rounded-lg border-2 border-zinc-300 bg-white pl-10 pr-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
                             placeholder="0.00"
@@ -3001,7 +3710,7 @@ export default function WorkOrdersListPage() {
                       <input
                         type="date"
                         required
-                        value={paymentFormData.transaction_date}
+                        value={paymentFormData.transaction_date || ''}
                         onChange={(e) => setPaymentFormData({ ...paymentFormData, transaction_date: e.target.value })}
                         className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
                       />
@@ -3013,7 +3722,7 @@ export default function WorkOrdersListPage() {
                         Payment Method
                       </label>
                       <select
-                        value={paymentFormData.payment_method}
+                        value={paymentFormData.payment_method || ''}
                         onChange={(e) => setPaymentFormData({ ...paymentFormData, payment_method: e.target.value })}
                         className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
                       >
@@ -3028,6 +3737,42 @@ export default function WorkOrdersListPage() {
                     </div>
                   </div>
 
+                  {/* Bank Name and Cheque Number (conditional) */}
+                  {(paymentFormData.payment_method === 'bank_transfer' || paymentFormData.payment_method === 'cheque') && (
+                    <div className="grid grid-cols-2 gap-6">
+                      <div>
+                        <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                          Bank Name <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={paymentFormData.bank_name || ''}
+                          onChange={(e) => setPaymentFormData({ ...paymentFormData, bank_name: e.target.value })}
+                          className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                          placeholder="Enter bank name"
+                        />
+                      </div>
+                      {paymentFormData.payment_method === 'cheque' ? (
+                        <div>
+                          <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                            Cheque Number <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={paymentFormData.cheque_number || ''}
+                            onChange={(e) => setPaymentFormData({ ...paymentFormData, cheque_number: e.target.value })}
+                            className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                            placeholder="Enter cheque number"
+                          />
+                        </div>
+                      ) : (
+                        <div></div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Status Row */}
                   <div className="grid grid-cols-2 gap-6">
                     <div>
@@ -3035,7 +3780,7 @@ export default function WorkOrdersListPage() {
                         Status
                       </label>
                       <select
-                        value={paymentFormData.status}
+                        value={paymentFormData.status || ''}
                         onChange={(e) => setPaymentFormData({ ...paymentFormData, status: e.target.value })}
                         className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
                       >
@@ -3117,7 +3862,7 @@ export default function WorkOrdersListPage() {
                           type="number"
                           step="0.01"
                           required
-                          value={paymentFormData.amount}
+                          value={paymentFormData.amount || ''}
                           onChange={(e) => setPaymentFormData({ ...paymentFormData, amount: e.target.value })}
                           className="block w-full rounded-lg border-2 border-zinc-300 bg-white pl-10 pr-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
                         />
@@ -3131,7 +3876,7 @@ export default function WorkOrdersListPage() {
                       <input
                         type="date"
                         required
-                        value={paymentFormData.transaction_date}
+                        value={paymentFormData.transaction_date || ''}
                         onChange={(e) => setPaymentFormData({ ...paymentFormData, transaction_date: e.target.value })}
                         className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
                       />
@@ -3145,7 +3890,7 @@ export default function WorkOrdersListPage() {
                         Payment Method
                       </label>
                       <select
-                        value={paymentFormData.payment_method}
+                        value={paymentFormData.payment_method || ''}
                         onChange={(e) => setPaymentFormData({ ...paymentFormData, payment_method: e.target.value })}
                         className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
                       >
@@ -3164,7 +3909,7 @@ export default function WorkOrdersListPage() {
                         Status
                       </label>
                       <select
-                        value={paymentFormData.status}
+                        value={paymentFormData.status || ''}
                         onChange={(e) => setPaymentFormData({ ...paymentFormData, status: e.target.value })}
                         className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
                       >
@@ -3174,6 +3919,42 @@ export default function WorkOrdersListPage() {
                       </select>
                     </div>
                   </div>
+
+                  {/* Bank Name and Cheque Number (conditional) */}
+                  {(paymentFormData.payment_method === 'bank_transfer' || paymentFormData.payment_method === 'cheque') && (
+                    <div className="grid grid-cols-2 gap-6">
+                      <div>
+                        <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                          Bank Name <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={paymentFormData.bank_name || ''}
+                          onChange={(e) => setPaymentFormData({ ...paymentFormData, bank_name: e.target.value })}
+                          className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                          placeholder="Enter bank name"
+                        />
+                      </div>
+                      {paymentFormData.payment_method === 'cheque' ? (
+                        <div>
+                          <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                            Cheque Number <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={paymentFormData.cheque_number || ''}
+                            onChange={(e) => setPaymentFormData({ ...paymentFormData, cheque_number: e.target.value })}
+                            className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                            placeholder="Enter cheque number"
+                          />
+                        </div>
+                      ) : (
+                        <div></div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Payment Type Amounts */}
                   <div>
@@ -3188,7 +3969,7 @@ export default function WorkOrdersListPage() {
                           <input
                             type="number"
                             step="0.01"
-                            value={paymentFormData.first_payment}
+                            value={paymentFormData.first_payment || ''}
                             onChange={(e) => setPaymentFormData({ ...paymentFormData, first_payment: e.target.value })}
                             className="block w-full rounded-lg border-2 border-zinc-300 bg-white pl-10 pr-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
                           />
@@ -3203,7 +3984,7 @@ export default function WorkOrdersListPage() {
                           <input
                             type="number"
                             step="0.01"
-                            value={paymentFormData.second_payment}
+                            value={paymentFormData.second_payment || ''}
                             onChange={(e) => setPaymentFormData({ ...paymentFormData, second_payment: e.target.value })}
                             className="block w-full rounded-lg border-2 border-zinc-300 bg-white pl-10 pr-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
                           />
@@ -3218,7 +3999,7 @@ export default function WorkOrdersListPage() {
                           <input
                             type="number"
                             step="0.01"
-                            value={paymentFormData.final_payment}
+                            value={paymentFormData.final_payment || ''}
                             onChange={(e) => setPaymentFormData({ ...paymentFormData, final_payment: e.target.value })}
                             className="block w-full rounded-lg border-2 border-zinc-300 bg-white pl-10 pr-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
                           />
@@ -3233,7 +4014,7 @@ export default function WorkOrdersListPage() {
                           <input
                             type="number"
                             step="0.01"
-                            value={paymentFormData.additional_payment}
+                            value={paymentFormData.additional_payment || ''}
                             onChange={(e) => setPaymentFormData({ ...paymentFormData, additional_payment: e.target.value })}
                             className="block w-full rounded-lg border-2 border-zinc-300 bg-white pl-10 pr-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
                           />
@@ -3268,7 +4049,573 @@ export default function WorkOrdersListPage() {
             </div>
           </div>
         )}
+
+        {/* BackOffice Edit Modal */}
+        {isBackOfficeModalOpen && backOfficeEditingWorkOrder && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg bg-white shadow-xl">
+              <div className="sticky top-0 bg-white border-b border-zinc-200 px-8 py-6 z-10">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-2xl font-bold text-[#1E1E1E]">
+                    Update Work Order - {backOfficeEditingWorkOrder.work_order_number}
+                  </h2>
+                  <button
+                    onClick={closeBackOfficeModal}
+                    disabled={backOfficeLoading}
+                    className="text-zinc-500 hover:text-zinc-700 transition-colors disabled:opacity-50"
+                  >
+                    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div className="px-8 py-6">
+                <form onSubmit={handleBackOfficeUpdate}>
+                  <div className="space-y-6">
+                    {/* Customer and Work Order Fields - Admin Only */}
+                    {(roleName === 'Admin' || roleName === 'Super Admin') && (
+                      <>
+                        <div className="pb-4 border-b border-zinc-200">
+                          <h3 className="text-lg font-semibold text-[#1E1E1E]">Work Order Details</h3>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-6">
+                          {/* Customer Name */}
+                          <div>
+                            <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                              Customer Name
+                            </label>
+                            <input
+                              type="text"
+                              value={backOfficeFormData.customer_name}
+                              onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, customer_name: e.target.value })}
+                              className={`block w-full rounded-lg border-2 ${formErrors.customer_name ? 'border-red-500' : 'border-zinc-300'} bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all`}
+                            />
+                          </div>
+
+                          {/* Customer Email */}
+                          <div>
+                            <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                              Customer Email
+                            </label>
+                            <input
+                              type="email"
+                              value={backOfficeFormData.customer_email}
+                              onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, customer_email: e.target.value })}
+                              className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Customer Address - Full Width */}
+                        <div>
+                          <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                            Customer Address
+                          </label>
+                          <textarea
+                            value={backOfficeFormData.customer_address}
+                            onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, customer_address: e.target.value })}
+                            rows={3}
+                            className={`block w-full rounded-lg border-2 ${formErrors.customer_address ? 'border-red-500' : 'border-zinc-300'} bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all`}
+                          />
+                        </div>
+
+                        {/* Town and Customer Phone */}
+                        <div className="grid grid-cols-2 gap-6">
+                          <div>
+                            <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                              Town
+                            </label>
+                            <input
+                              type="text"
+                              value={backOfficeFormData.town}
+                              onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, town: e.target.value })}
+                              className={`block w-full rounded-lg border-2 ${formErrors.town ? 'border-red-500' : 'border-zinc-300'} bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all`}
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                              Customer Phone
+                            </label>
+                            <input
+                              type="tel"
+                              value={backOfficeFormData.customer_phone}
+                              onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, customer_phone: e.target.value })}
+                              className={`block w-full rounded-lg border-2 ${formErrors.customer_phone ? 'border-red-500' : 'border-zinc-300'} bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all`}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Power Bill and Order Amount */}
+                        <div className="grid grid-cols-2 gap-6">
+                          <div>
+                            <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                              Power Bill
+                            </label>
+                            <div className="relative">
+                              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-bold text-[#1E1E1E] opacity-70">₹</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={backOfficeFormData.power_bill}
+                                onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, power_bill: e.target.value })}
+                                className="block w-full rounded-lg border-2 border-zinc-300 bg-white pl-10 pr-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                              Order Amount
+                            </label>
+                            <div className="relative">
+                              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-bold text-[#1E1E1E] opacity-70">₹</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={backOfficeFormData.order_amount}
+                                onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, order_amount: e.target.value })}
+                                className={`block w-full rounded-lg border-2 ${formErrors.order_amount ? 'border-red-500' : 'border-zinc-300'} bg-white pl-10 pr-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all`}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Power Units - Full Width */}
+                        <div>
+                          <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                            Power Units
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={backOfficeFormData.power_units}
+                            onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, power_units: e.target.value })}
+                            placeholder="kWh"
+                            className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                          />
+                        </div>
+
+                        {/* Site Details - Full Width */}
+                        <div>
+                          <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                            Site Details
+                          </label>
+                          <textarea
+                            value={backOfficeFormData.site_details}
+                            onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, site_details: e.target.value })}
+                            rows={4}
+                            className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                          />
+                        </div>
+
+                        {/* Documents Section - File uploads enabled for Admin */}
+                        <div className="pb-4 border-t border-zinc-200 pt-6">
+                          <h4 className="text-base font-semibold text-[#1E1E1E] mb-3">Document Uploads</h4>
+                          <div className="space-y-4">
+                            {/* Aadhaar Upload */}
+                            <div>
+                              <label htmlFor="backoffice_aadhaar_file" className="block text-sm font-medium text-[#1E1E1E] mb-1">
+                                Aadhaar Document
+                              </label>
+                              <input
+                                id="backoffice_aadhaar_file"
+                                type="file"
+                                accept="image/*,application/pdf"
+                                onChange={(e) => handleBackOfficeDocumentUpload(e, 'aadhaar')}
+                                disabled={backOfficeDocumentUploading.aadhaar}
+                                className="block w-full text-sm text-[#1E1E1E] file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-[#0BC28E] file:text-white hover:file:bg-[#0aa578] disabled:opacity-50 cursor-pointer"
+                              />
+                              {backOfficeDocumentUploading.aadhaar && <p className="mt-1 text-sm text-blue-500">Uploading...</p>}
+                              {backOfficeDocumentErrors.aadhaar && <p className="mt-1 text-sm text-red-500">{backOfficeDocumentErrors.aadhaar}</p>}
+                              {backOfficeFormData.aadhaar_url && !backOfficeDocumentUploading.aadhaar && (
+                                <p className="mt-1 text-sm text-green-600">
+                                  ✓ Uploaded! <a href={backOfficeFormData.aadhaar_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">View</a>
+                                </p>
+                              )}
+                            </div>
+
+                            {/* PAN Upload */}
+                            <div>
+                              <label htmlFor="backoffice_pan_file" className="block text-sm font-medium text-[#1E1E1E] mb-1">
+                                PAN Document
+                              </label>
+                              <input
+                                id="backoffice_pan_file"
+                                type="file"
+                                accept="image/*,application/pdf"
+                                onChange={(e) => handleBackOfficeDocumentUpload(e, 'pan')}
+                                disabled={backOfficeDocumentUploading.pan}
+                                className="block w-full text-sm text-[#1E1E1E] file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-[#0BC28E] file:text-white hover:file:bg-[#0aa578] disabled:opacity-50 cursor-pointer"
+                              />
+                              {backOfficeDocumentUploading.pan && <p className="mt-1 text-sm text-blue-500">Uploading...</p>}
+                              {backOfficeDocumentErrors.pan && <p className="mt-1 text-sm text-red-500">{backOfficeDocumentErrors.pan}</p>}
+                              {backOfficeFormData.pan_url && !backOfficeDocumentUploading.pan && (
+                                <p className="mt-1 text-sm text-green-600">
+                                  ✓ Uploaded! <a href={backOfficeFormData.pan_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">View</a>
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Bank Statement Upload */}
+                            <div>
+                              <label htmlFor="backoffice_bank_statement_file" className="block text-sm font-medium text-[#1E1E1E] mb-1">
+                                Bank Statement Document
+                              </label>
+                              <input
+                                id="backoffice_bank_statement_file"
+                                type="file"
+                                accept="image/*,application/pdf"
+                                onChange={(e) => handleBackOfficeDocumentUpload(e, 'bank_statement')}
+                                disabled={backOfficeDocumentUploading.bank_statement}
+                                className="block w-full text-sm text-[#1E1E1E] file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-[#0BC28E] file:text-white hover:file:bg-[#0aa578] disabled:opacity-50 cursor-pointer"
+                              />
+                              {backOfficeDocumentUploading.bank_statement && <p className="mt-1 text-sm text-blue-500">Uploading...</p>}
+                              {backOfficeDocumentErrors.bank_statement && <p className="mt-1 text-sm text-red-500">{backOfficeDocumentErrors.bank_statement}</p>}
+                              {backOfficeFormData.bank_statement_url && !backOfficeDocumentUploading.bank_statement && (
+                                <p className="mt-1 text-sm text-green-600">
+                                  ✓ Uploaded! <a href={backOfficeFormData.bank_statement_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">View</a>
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Cancelled Check Upload */}
+                            <div>
+                              <label htmlFor="backoffice_cancelled_check_file" className="block text-sm font-medium text-[#1E1E1E] mb-1">
+                                Cancelled Check Document
+                              </label>
+                              <input
+                                id="backoffice_cancelled_check_file"
+                                type="file"
+                                accept="image/*,application/pdf"
+                                onChange={(e) => handleBackOfficeDocumentUpload(e, 'cancelled_check')}
+                                disabled={backOfficeDocumentUploading.cancelled_check}
+                                className="block w-full text-sm text-[#1E1E1E] file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-[#0BC28E] file:text-white hover:file:bg-[#0aa578] disabled:opacity-50 cursor-pointer"
+                              />
+                              {backOfficeDocumentUploading.cancelled_check && <p className="mt-1 text-sm text-blue-500">Uploading...</p>}
+                              {backOfficeDocumentErrors.cancelled_check && <p className="mt-1 text-sm text-red-500">{backOfficeDocumentErrors.cancelled_check}</p>}
+                              {backOfficeFormData.cancelled_check_url && !backOfficeDocumentUploading.cancelled_check && (
+                                <p className="mt-1 text-sm text-green-600">
+                                  ✓ Uploaded! <a href={backOfficeFormData.cancelled_check_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">View</a>
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Technical Fields */}
+                        <div className="grid grid-cols-3 gap-6">
+                          <div>
+                            <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                              Plant Capacity
+                            </label>
+                            <select
+                              value={backOfficeFormData.plant_capacity}
+                              onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, plant_capacity: e.target.value })}
+                              className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                            >
+                              <option value="">Select capacity</option>
+                              <option value="1">1KW</option>
+                              <option value="2">2KW</option>
+                              <option value="3">3KW</option>
+                              <option value="4">4KW</option>
+                              <option value="5">5KW</option>
+                              <option value="6">6KW</option>
+                              <option value="7">7KW</option>
+                              <option value="8">8KW</option>
+                              <option value="9">9KW</option>
+                              <option value="10">10KW</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                              Structure Height
+                            </label>
+                            <select
+                              value={backOfficeFormData.structure_height}
+                              onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, structure_height: e.target.value })}
+                              className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                            >
+                              <option value="">Select height</option>
+                              <option value="3-4Ft">3-4Ft</option>
+                              <option value="6-7Ft">6-7Ft</option>
+                              <option value="8-10Ft">8-10Ft</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                              Roof Type
+                            </label>
+                            <select
+                              value={backOfficeFormData.roof_type}
+                              onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, roof_type: e.target.value })}
+                              className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                            >
+                              <option value="">Select roof type</option>
+                              <option value="Iron Shed">Iron Shed</option>
+                              <option value="RCC">RCC</option>
+                              <option value="Single Floor">Single Floor</option>
+                              <option value="Double Floor">Double Floor</option>
+                              <option value="Apartment">Apartment</option>
+                              <option value="Ground">Ground</option>
+                              <option value="Asbestos Sheet">Asbestos Sheet</option>
+                            </select>
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+
+                    {/* Status Management Section - Visible to ALL roles (Admin, Super Admin, BackOffice) */}
+                    <div className="pb-4 border-b border-zinc-200 mt-6">
+                      <h3 className="text-lg font-semibold text-[#1E1E1E]">Status Management</h3>
+                    </div>
+
+                    {/* Work Order Status */}
+                    <div>
+                      <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                        Work Order Status
+                      </label>
+                      <select
+                        value={backOfficeFormData.work_order_status}
+                        onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, work_order_status: e.target.value })}
+                        className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                      >
+                        <option value="">Select Status</option>
+                        <option value="Erection and Installation">Erection and Installation</option>
+                        <option value="Dept. Submission of Docs">Dept. Submission of Docs</option>
+                        <option value="Meter Installation">Meter Installation</option>
+                        <option value="Subsidy Ready for Redemption">Subsidy Ready for Redemption</option>
+                        <option value="Customer Eligible for Redemption">Customer Eligible for Redemption</option>
+                        <option value="Subsidy Follow Up">Subsidy Follow Up</option>
+                        <option value="Subsidy Received by Customer">Subsidy Received by Customer</option>
+                        <option value="Online Mobile App Demo to Customer">Online Mobile App Demo to Customer</option>
+                        <option value="Tata Sales Force Upload">Tata Sales Force Upload</option>
+                        <option value="Warranty Certificate Approval">Warranty Certificate Approval</option>
+                        <option value="Warranty Certificate Given to Customer">Warranty Certificate Given to Customer</option>
+                        <option value="Successfully Completed">Successfully Completed</option>
+                      </select>
+                      <p className="mt-1 text-sm text-zinc-600">Current: {backOfficeEditingWorkOrder.work_order_status || 'Not set'}</p>
+                    </div>
+
+                    {/* Subsidy Fields Row - Show from 'Subsidy Ready for Redemption' onwards */}
+                    {['Subsidy Ready for Redemption', 'Customer Eligible for Redemption', 'Subsidy Follow Up', 'Subsidy Received by Customer', 'Online Mobile App Demo to Customer', 'Tata Sales Force Upload', 'Warranty Certificate Approval', 'Warranty Certificate Given to Customer', 'Successfully Completed'].includes(backOfficeFormData.work_order_status) && (
+                    <div className="grid grid-cols-2 gap-6">
+                      {/* Subsidy Amount */}
+                      <div>
+                        <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                          Subsidy Amount
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-bold text-[#1E1E1E] opacity-70">₹</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={backOfficeFormData.subsidy_amount}
+                            onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, subsidy_amount: e.target.value })}
+                            placeholder="Enter subsidy amount"
+                            className="block w-full rounded-lg border-2 border-zinc-300 bg-white pl-10 pr-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Subsidy Status */}
+                      <div>
+                        <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                          Subsidy Status
+                        </label>
+                        <select
+                          value={backOfficeFormData.subsidy_status}
+                          onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, subsidy_status: e.target.value })}
+                          className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                        >
+                          <option value="">Select Status</option>
+                          <option value="Pending">Pending</option>
+                          <option value="Received">Received</option>
+                          <option value="Not Applicable">Not Applicable</option>
+                        </select>
+                      </div>
+                    </div>
+                    )}
+
+                    {/* Warranty Approval Field - Show only for 'Warranty Certificate Approval' status */}
+                    {backOfficeFormData.work_order_status === 'Warranty Certificate Approval' && (
+                    <div>
+                      <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                        Warranty Approval Decision <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={backOfficeFormData.warranty_approval}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setBackOfficeFormData({ 
+                            ...backOfficeFormData, 
+                            warranty_approval: value,
+                            // If rejected, change status to "Warranty Rejected"
+                            work_order_status: value === 'Rejected' ? 'Warranty Rejected' : backOfficeFormData.work_order_status
+                          });
+                        }}
+                        className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                      >
+                        <option value="">Select Decision</option>
+                        <option value="Accepted">Accepted</option>
+                        <option value="Rejected">Rejected</option>
+                      </select>
+                      {backOfficeFormData.warranty_approval === 'Rejected' && (
+                        <p className="mt-1 text-sm text-red-600">
+                          Note: Status will be changed to "Warranty Rejected"
+                        </p>
+                      )}
+                    </div>
+                    )}
+
+                    {/* Installation Dates Row */}
+                    <div className="grid grid-cols-2 gap-6">
+                      {/* Erection Done At */}
+                      <div>
+                        <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                          Erection Completed Date
+                        </label>
+                        <input
+                          type="date"
+                          value={backOfficeFormData.erection_done_at}
+                          onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, erection_done_at: e.target.value })}
+                          className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                        />
+                      </div>
+
+                      {/* Meter Completed At */}
+                      <div>
+                        <label className="block text-base font-semibold text-[#1E1E1E] mb-2">
+                          Meter Installation Date
+                        </label>
+                        <input
+                          type="date"
+                          value={backOfficeFormData.meter_completed_at}
+                          onChange={(e) => setBackOfficeFormData({ ...backOfficeFormData, meter_completed_at: e.target.value })}
+                          className="block w-full rounded-lg border-2 border-zinc-300 bg-white px-4 py-3 text-base text-[#1E1E1E] focus:border-[#0BC28E] focus:outline-none focus:ring-2 focus:ring-[#0BC28E] transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Info Note */}
+                    <div className="rounded-lg bg-blue-50 border border-blue-200 p-4">
+                      <p className="text-sm text-blue-800">
+                        <strong>Note:</strong> Leave fields empty to keep current values. Only filled fields will be updated.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-4 pt-6 mt-6 border-t border-zinc-200">
+                    <button
+                      type="submit"
+                      disabled={backOfficeLoading}
+                      className="flex-1 rounded-lg bg-[#0BC28E] px-6 py-3 text-base font-semibold text-white hover:bg-[#0BA87D] disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+                    >
+                      {backOfficeLoading ? 'Updating...' : 'Update Work Order'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={closeBackOfficeModal}
+                      disabled={backOfficeLoading}
+                      className="flex-1 rounded-lg border-2 border-zinc-300 px-6 py-3 text-base font-semibold text-[#1E1E1E] hover:bg-zinc-50 transition-colors duration-150 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
+
+      {/* Success Modal */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl p-8 max-w-md mx-4 shadow-2xl">
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+                <svg className="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Success!</h3>
+              <p className="text-sm text-gray-600 mb-6">
+                Work order marked as dispatched successfully! WhatsApp messages have been sent.
+              </p>
+              <button
+                onClick={() => setShowSuccessModal(false)}
+                className="w-full rounded-lg bg-[#0BC28E] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0BA87D] transition-colors"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Notification Modal (replaces browser alerts) */}
+      {notificationModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/30 backdrop-blur-md p-4">
+          <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4 shadow-2xl border border-zinc-200">
+            <div className="text-center">
+              {/* Icon based on type */}
+              <div className={`mx-auto flex items-center justify-center h-12 w-12 rounded-full mb-4 ${
+                notificationModal.type === 'success' ? 'bg-green-100' :
+                notificationModal.type === 'error' ? 'bg-red-100' : 'bg-blue-100'
+              }`}>
+                {notificationModal.type === 'success' && (
+                  <svg className="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+                {notificationModal.type === 'error' && (
+                  <svg className="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                )}
+                {notificationModal.type === 'info' && (
+                  <svg className="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                )}
+              </div>
+              
+              {/* Title */}
+              <h3 className={`text-lg font-semibold mb-2 ${
+                notificationModal.type === 'success' ? 'text-green-800' :
+                notificationModal.type === 'error' ? 'text-red-800' : 'text-blue-800'
+              }`}>
+                {notificationModal.title}
+              </h3>
+              
+              {/* Message */}
+              <p className="text-sm text-gray-600 mb-6">
+                {notificationModal.message}
+              </p>
+              
+              {/* OK Button */}
+              <button
+                onClick={closeNotification}
+                className={`w-full rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition-colors ${
+                  notificationModal.type === 'success' ? 'bg-[#0BC28E] hover:bg-[#0BA87D]' :
+                  notificationModal.type === 'error' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

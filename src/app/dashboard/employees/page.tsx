@@ -6,6 +6,7 @@ import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import PageHeader from '@/components/PageHeader';
 import { LoadingSpinner, Button } from '@/components/ui';
+import Modal from '@/components/ui/Modal';
 
 interface Employee {
   id: string;
@@ -53,6 +54,15 @@ export default function EmployeesPage() {
     company_id: '',
     phone_number: '',
   });
+
+  // Modal state
+  const [modal, setModal] = useState<{
+    isOpen: boolean;
+    type: 'confirm' | 'alert' | 'success' | 'error';
+    title: string;
+    message: string;
+    onConfirm?: () => void;
+  }>({ isOpen: false, type: 'alert', title: '', message: '' });
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -106,13 +116,26 @@ export default function EmployeesPage() {
     console.log('Fetching employees, excluding user ID:', excludeUserId);
     
     try {
-      // Fetch profiles via API route (uses service role key, bypasses RLS)
+      // Get access token from Supabase session
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+
+      if (!accessToken) {
+        console.error('No access token found');
+        setEmployees([]);
+        return;
+      }
+
+      // Fetch profiles via API route with access token
       const response = await fetch('/api/employees/list', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ excludeUserId }),
+        body: JSON.stringify({ 
+          access_token: accessToken,
+          excludeUserId 
+        }),
       });
 
       const result = await response.json();
@@ -186,13 +209,21 @@ export default function EmployeesPage() {
 
       // Fetch emails in background (non-blocking)
       const userIds = profilesData.map((p: any) => p.id);
-    fetch('/api/employees/emails', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ userIds }),
-    })
+    // Get access token for emails fetch
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const accessToken = session?.access_token;
+      if (!accessToken) return;
+
+      fetch('/api/employees/emails', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ 
+          userIds 
+        }),
+      })
       .then((response) => {
         if (response.ok) {
           return response.json();
@@ -200,7 +231,10 @@ export default function EmployeesPage() {
         throw new Error('Failed to fetch emails');
       })
       .then((data) => {
+        console.log('✅ Email API Response:', data);
         const emailMap = data.emailMap || {};
+        console.log('📧 Email Map:', emailMap);
+        
         // Update employees with emails, preserving company_name
         const updatedEmployees = employeesWithData.map((employee: any) => ({
           ...employee,
@@ -209,6 +243,13 @@ export default function EmployeesPage() {
             email: emailMap[employee.id] || 'N/A',
           },
         }));
+        
+        console.log('👥 Updated Employees with Emails:', updatedEmployees.map((e: any) => ({
+          id: e.id,
+          name: e.full_name,
+          email: e.auth_users?.email
+        })));
+        
         setEmployees(updatedEmployees as Employee[]);
       })
       .catch((error) => {
@@ -223,6 +264,7 @@ export default function EmployeesPage() {
         }));
         setEmployees(updatedEmployees as Employee[]);
       });
+    });
     } catch (error: unknown) {
       console.error('Error in fetchEmployees:', error);
       alert(`Error loading employees: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -265,13 +307,22 @@ export default function EmployeesPage() {
 
     try {
       if (editingEmployee) {
-        // Update existing employee via API route (uses service role key to bypass RLS)
+        // Get access token
+        const { data: { session } } = await supabase.auth.getSession();
+        const accessToken = session?.access_token;
+
+        if (!accessToken) {
+          throw new Error('No access token found');
+        }
+
+        // Update existing employee via API route
         const response = await fetch('/api/employees/update', {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
+            access_token: accessToken,
             user_id: editingEmployee.id,
             full_name: formData.full_name,
             role_id: formData.role_id,
@@ -286,13 +337,22 @@ export default function EmployeesPage() {
           throw new Error(result.error || 'Failed to update employee');
         }
       } else {
-        // Create new employee via API route (uses service role key)
+        // Get access token
+        const { data: { session } } = await supabase.auth.getSession();
+        const accessToken = session?.access_token;
+
+        if (!accessToken) {
+          throw new Error('No access token found');
+        }
+
+        // Create new employee via API route
         const response = await fetch('/api/employees/create', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
+            access_token: accessToken,
             email: formData.email,
             password: formData.password,
             full_name: formData.full_name,
@@ -312,18 +372,34 @@ export default function EmployeesPage() {
       setShowForm(false);
       setEditingEmployee(null);
       setFormData({ email: '', password: '', full_name: '', role_id: '', company_id: '', phone_number: '' });
+      
+      // Show success message
+      setModal({
+        isOpen: true,
+        type: 'success',
+        title: editingEmployee ? 'Employee Updated' : 'Employee Created',
+        message: editingEmployee 
+          ? 'Employee details have been successfully updated.'
+          : 'New employee has been successfully created.',
+      });
+      
       if (currentUserId) {
         await fetchEmployees(currentUserId);
       }
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'An error occurred');
+      setModal({
+        isOpen: true,
+        type: 'error',
+        title: 'Error',
+        message: error instanceof Error ? error.message : 'An error occurred',
+      });
     }
   };
 
   const handleEdit = (employee: Employee) => {
     setEditingEmployee(employee);
     setFormData({
-      email: '',
+      email: employee.auth_users?.email || '',
       password: '',
       full_name: employee.full_name,
       role_id: employee.role_id,
@@ -334,30 +410,61 @@ export default function EmployeesPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this employee?')) return;
+    // Show confirmation modal
+    setModal({
+      isOpen: true,
+      type: 'confirm',
+      title: 'Delete Employee',
+      message: 'Are you sure you want to delete this employee? This action cannot be undone.',
+      onConfirm: async () => {
+        try {
+          // Get access token
+          const { data: { session } } = await supabase.auth.getSession();
+          const accessToken = session?.access_token;
 
-    try {
-      // Delete employee via API route (uses service role key to bypass RLS)
-      const response = await fetch('/api/employees/delete', {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ user_id: id }),
-      });
+          if (!accessToken) {
+            throw new Error('No access token found');
+          }
 
-      const result = await response.json();
+          // Delete employee via API route
+          const response = await fetch('/api/employees/delete', {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ 
+              access_token: accessToken,
+              user_id: id 
+            }),
+          });
 
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to delete employee');
-      }
+          const result = await response.json();
 
-      if (currentUserId) {
-        await fetchEmployees(currentUserId);
-      }
-    } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'An error occurred');
-    }
+          if (!response.ok) {
+            throw new Error(result.error || 'Failed to delete employee');
+          }
+
+          // Show success message
+          setModal({
+            isOpen: true,
+            type: 'success',
+            title: 'Employee Deleted',
+            message: 'Employee has been successfully deleted.',
+          });
+
+          if (currentUserId) {
+            await fetchEmployees(currentUserId);
+          }
+        } catch (error: unknown) {
+          setModal({
+            isOpen: true,
+            type: 'error',
+            title: 'Error',
+            message: error instanceof Error ? error.message : 'An error occurred',
+          });
+        }
+      },
+    });
   };
 
   if (loading) {
@@ -395,6 +502,22 @@ export default function EmployeesPage() {
               {editingEmployee ? 'Edit Employee' : 'Add New Employee'}
             </h3>
             <form onSubmit={handleSubmit} className="space-y-4">
+              {editingEmployee && (
+                <div>
+                  <label className="block text-sm font-medium text-foreground">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    disabled
+                    value={formData.email}
+                    className="mt-1 block w-full rounded-md border border-border bg-gray-100 px-3 py-2 text-foreground cursor-not-allowed"
+                  />
+                  <p className="mt-1 text-xs text-foreground opacity-70">
+                    Email cannot be changed
+                  </p>
+                </div>
+              )}
               {!editingEmployee && (
                 <>
                   <div>
@@ -640,6 +763,17 @@ export default function EmployeesPage() {
           </table>
         </div>
       </main>
+
+      {/* Modal for confirmations, alerts, success and error messages */}
+      <Modal
+        isOpen={modal.isOpen}
+        onClose={() => setModal({ ...modal, isOpen: false })}
+        onConfirm={modal.onConfirm}
+        title={modal.title}
+        message={modal.message}
+        type={modal.type}
+        confirmText={modal.type === 'confirm' ? 'Delete' : 'OK'}
+      />
     </div>
   );
 }

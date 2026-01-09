@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient, verifyUserAndGetProfile, getServiceClient } from '@/lib/supabase-server';
+import { createServerClient, verifyUserAndGetProfile } from '@/lib/supabase-server';
 
 /**
  * API route to fetch executives for lead assignment dropdown
@@ -28,11 +28,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Use service client for fetching profiles (bypasses RLS for this lookup only)
-    const serviceClient = getServiceClient();
-
+    // Use authenticated supabase client for fetching profiles
     // Fetch all profiles from the same company
-    const { data: profiles, error: profilesError } = await serviceClient
+    const { data: profiles, error: profilesError } = await supabase
       .from('profiles')
       .select(`
         id,

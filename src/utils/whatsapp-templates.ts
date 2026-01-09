@@ -170,3 +170,65 @@ Customer has been notified via WhatsApp.
 GM Solar Systems`;
 }
 
+/**
+ * Customer message template for payment confirmation
+ */
+export function getCustomerPaymentMessage(data: WorkOrderData, paymentAmount: number): string {
+  const totalPaid = data.payment_received || 0;
+  const balance = data.order_amount - totalPaid;
+  
+  return `Dear ${data.customer_name},
+We have received your payment of ${formatCurrency(paymentAmount)} against Work Order #${data.work_order_number}.
+
+Total Amount Paid: ${formatCurrency(totalPaid)}
+Remaining Balance: ${formatCurrency(balance)}
+
+Thank you for choosing GM Solar Systems!`;
+}
+
+/**
+ * Admin/Executive message template for payment confirmation
+ */
+export function getAdminPaymentMessage(data: WorkOrderData, paymentAmount: number): string {
+  const totalPaid = data.payment_received || 0;
+  const percentage = data.order_amount > 0 ? (totalPaid / data.order_amount * 100).toFixed(1) : '0';
+
+  return `Payment Received Alert - WO #${data.work_order_number}
+Customer: ${data.customer_name}
+Amount: ${formatCurrency(paymentAmount)}
+Total Paid: ${formatCurrency(totalPaid)} (${percentage}%)
+Executive: ${data.executive_name || 'N/A'}`;
+}
+
+/**
+ * Customer message template for generic status updates (Installed, Completed, etc.)
+ */
+export function getCustomerStatusUpdateMessage(data: WorkOrderData, status: string): string {
+  let statusMessage = '';
+  
+  if (status === 'Installed') {
+    statusMessage = `Your solar plant for Work Order #${data.work_order_number} has been successfully installed! ☀️`;
+  } else if (status === 'Completed' || status === 'Closed') {
+    statusMessage = `Congratulations! Your solar project #${data.work_order_number} is now complete and fully operational. ✅`;
+  } else if (status === 'Advance Paid') {
+    statusMessage = `Thank you for the advance payment for Work Order #${data.work_order_number}. Our team will now begin the process. 🚀`;
+  } else {
+    statusMessage = `The status of your work order #${data.work_order_number} has been updated to: ${status}.`;
+  }
+
+  return `Dear ${data.customer_name},
+${statusMessage}
+
+Thank you for your trust in GM Solar Systems!`;
+}
+
+/**
+ * Admin/Executive message template for generic status updates
+ */
+export function getAdminStatusUpdateMessage(data: WorkOrderData, status: string): string {
+  return `Status Update Alert - WO #${data.work_order_number}
+Customer: ${data.customer_name}
+New Status: ${status}
+Executive: ${data.executive_name || 'N/A'}`;
+}
+

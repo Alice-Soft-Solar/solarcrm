@@ -9,6 +9,7 @@ export const ROLES = {
   ADMIN: 'Admin',
   SUPER_ADMIN: 'Super Admin',
   INVENTORY: 'Inventory',
+  BACK_OFFICE: 'BackOffice',
 } as const;
 
 export type RoleName = typeof ROLES[keyof typeof ROLES];
@@ -22,6 +23,7 @@ export const ALLOWED_ROLES: readonly RoleName[] = [
   ROLES.ADMIN,
   ROLES.SUPER_ADMIN,
   ROLES.INVENTORY,
+  ROLES.BACK_OFFICE,
 ];
 
 /**
@@ -50,6 +52,13 @@ export function isSalesRole(roleName: string | null | undefined): boolean {
  */
 export function isSalesLeadRole(roleName: string | null | undefined): boolean {
   return roleName === ROLES.SALES_LEAD;
+}
+
+/**
+ * Check if a role is BackOffice
+ */
+export function isBackOfficeRole(roleName: string | null | undefined): boolean {
+  return roleName === ROLES.BACK_OFFICE;
 }
 
 

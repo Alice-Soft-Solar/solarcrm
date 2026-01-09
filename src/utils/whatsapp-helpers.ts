@@ -173,6 +173,43 @@ export async function getInventoryUsers(
 }
 
 /**
+ * Fetches sales lead users for a company
+ */
+export async function getSalesLeadUsers(
+  companyId: string,
+  supabase: ReturnType<typeof createClient> | any
+): Promise<UserWithPhone[]> {
+  try {
+    const { data: salesLeads, error } = await supabase
+      .from('profiles')
+      .select(`
+        id,
+        full_name,
+        phone_number,
+        roles!inner (
+          role_name
+        )
+      `)
+      .eq('company_id', companyId)
+      .eq('roles.role_name', 'salesLead');
+
+    if (error) {
+      console.error('Error fetching sales lead users:', error);
+      return [];
+    }
+
+    return (salesLeads || []).map((user: any) => ({
+      id: user.id,
+      full_name: user.full_name,
+      phone: user.phone_number,
+    }));
+  } catch (error) {
+    console.error('Error in getSalesLeadUsers:', error);
+    return [];
+  }
+}
+
+/**
  * Sends WhatsApp message to a user (with phone number validation)
  */
 export async function sendWhatsAppToUser(

@@ -505,12 +505,15 @@ export default function ViewLeadsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      const accessToken = getAccessToken();
       const response = await fetch('/api/leads/delete', {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
         },
         body: JSON.stringify({
+          ...(accessToken && { access_token: accessToken }),
           lead_id: lead.id,
         }),
       });
@@ -542,9 +545,9 @@ export default function ViewLeadsPage() {
       let finalStatus = formData.status;
       let finalVisitStatus = formData.visit_status;
 
-      // If third visit and still "Follow Up Required", auto-update to "Not Interested"
+      // If third visit and still "Follow Up Required", auto-update to "Closed"
       if (formData.visit_status === 'Third Visit' && formData.status === 'Follow Up Required') {
-        finalStatus = 'Not Interested';
+        finalStatus = 'Closed';
         // Keep visit_status as "Third Visit" (don't change it)
         finalVisitStatus = 'Third Visit';
       }
@@ -666,9 +669,53 @@ export default function ViewLeadsPage() {
     alert('Excel export feature coming soon');
   };
 
-  const handleExportPDF = () => {
-    // TODO: Implement PDF export
-    alert('PDF export feature coming soon');
+  const handleExportPDF = async () => {
+    if (!profile?.company_id) {
+      alert('Company information not found. Please refresh the page.');
+      return;
+    }
+
+    try {
+      const accessToken = getAccessToken();
+      const response = await fetch('/api/leads/generate-pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+        },
+        body: JSON.stringify({
+          ...(accessToken && { access_token: accessToken }),
+          filters: {
+            executiveId: filterExecutive || undefined,
+            status: filterStatus || undefined,
+            visitStatus: filterVisitStatus || undefined,
+            singleDate: filterSingleDate || undefined,
+            dateFrom: filterDateFrom || undefined,
+            dateTo: filterDateTo || undefined,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to generate PDF');
+      }
+
+      // Download PDF
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const today = new Date().toISOString().split('T')[0];
+      link.download = `leads-report-${today}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error: unknown) {
+      console.error('Error generating PDF:', error);
+      alert(error instanceof Error ? error.message : 'Failed to generate PDF');
+    }
   };
 
 
@@ -773,6 +820,7 @@ export default function ViewLeadsPage() {
                 <option value="Interested">Interested</option>
                 <option value="Not Interested">Not Interested</option>
                 <option value="Follow Up Required">Follow Up Required</option>
+                <option value="Closed">Closed</option>
               </select>
             </div>
 
@@ -1044,50 +1092,27 @@ export default function ViewLeadsPage() {
                       <td className="px-6 py-4 text-sm" onClick={(e) => e.stopPropagation()}>
                         {lead.photo_url ? (
                           <div className="relative h-12 w-12">
-                            <img
-                              src={imageUrls[lead.id] || lead.photo_url}
-                              alt="Lead photo"
-                              className="h-12 w-12 rounded object-cover cursor-pointer border border-zinc-200 hover:opacity-80 transition-opacity"
-                              onClick={() => handleImageClick(lead.photo_url, lead.id)}
-                              onError={async (e) => {
-                                const img = e.target as HTMLImageElement;
-                                const currentSrc = img.src;
-                                
-                                // If we haven't tried to get the processed URL yet, try it
-                                if (!imageUrls[lead.id] && lead.photo_url && currentSrc === lead.photo_url) {
-                                  try {
-                                    const processedUrl = await getImageUrl(lead.photo_url);
-                                    if (processedUrl && processedUrl !== lead.photo_url) {
-                                      img.src = processedUrl;
-                                      setImageUrls(prev => ({ ...prev, [lead.id]: processedUrl }));
-                                      return;
-                                    }
-                                  } catch (err) {
-                                    console.error('Error processing image URL:', err);
+                            {imageUrls[lead.id] ? (
+                              <img
+                                src={imageUrls[lead.id]}
+                                alt="Lead photo"
+                                className="h-12 w-12 rounded object-cover cursor-pointer border border-zinc-200 hover:opacity-80 transition-opacity"
+                                onClick={() => handleImageClick(lead.photo_url, lead.id)}
+                                onError={(e) => {
+                                  const img = e.target as HTMLImageElement;
+                                  img.style.display = 'none';
+                                  const fallback = img.nextElementSibling as HTMLElement;
+                                  if (fallback) {
+                                    fallback.style.display = 'flex';
                                   }
-                                }
-                                
-                                // If all attempts failed, hide image and show fallback
-                                img.style.display = 'none';
-                                const fallback = img.nextElementSibling as HTMLElement;
-                                if (fallback) {
-                                  fallback.style.display = 'flex';
-                                }
-                              }}
-                              onLoad={() => {
-                                // Image loaded successfully, hide any fallback
-                                const fallback = document.querySelector(`[data-lead-id="${lead.id}"] .image-fallback`) as HTMLElement;
-                                if (fallback) {
-                                  fallback.style.display = 'none';
-                                }
-                              }}
-                            />
+                                }}
+                              />
+                            ) : null}
                             <span 
-                              className="absolute inset-0 flex items-center justify-center text-foreground opacity-50 text-xs image-fallback"
-                              style={{ display: 'none' }}
-                              data-lead-id={lead.id}
+                              className="absolute inset-0 flex items-center justify-center text-foreground opacity-50 text-xs"
+                              style={{ display: imageUrls[lead.id] ? 'none' : 'flex' }}
                             >
-                              N/A
+                              ...
                             </span>
                           </div>
                         ) : (
@@ -1296,9 +1321,9 @@ export default function ViewLeadsPage() {
                       </div>
                     </div>
                   )}
-                  {selectedLead.photo_url && (
-                    <div className="md:col-span-2">
-                      <label className="text-sm font-medium text-foreground opacity-70">Photo</label>
+                  <div className="md:col-span-2">
+                    <label className="text-sm font-medium text-foreground opacity-70">Photo</label>
+                    {selectedLead.photo_url ? (
                       <div className="mt-2 relative">
                         <img
                           src={imageUrls[selectedLead.id] || selectedLead.photo_url}
@@ -1338,8 +1363,10 @@ export default function ViewLeadsPage() {
                           Image not available
                         </span>
                       </div>
-                    </div>
-                  )}
+                    ) : (
+                      <p className="mt-2 text-foreground opacity-50">No photo captured</p>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

@@ -1,69 +1,81 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient, verifyUserAndGetProfile } from '@/lib/supabase-server';
+
+/**
+ * API Route: List Employees
+ * 
+ * Security Model:
+ * - User is verified via JWT token (verifyUserAndGetProfile)
+ * - Query uses verified companyId to filter (not RLS)
+ * - RLS doesn't work because Supabase JS can't set auth.uid() in server context
+ * - This is equivalent security: user is verified, then query filters by their company
+ */
 
 export async function POST(request: NextRequest) {
   try {
-    const { excludeUserId } = await request.json();
+    // Step 1: Create authenticated Supabase client (needed for verification)
+    const supabase = await createServerClient(request);
 
-    if (!excludeUserId) {
-      return NextResponse.json(
-        { error: 'excludeUserId is required' },
-        { status: 400 }
-      );
-    }
+    // Step 2: Verify user and get verified profile/role
+    // This decodes JWT and fetches profile - if this succeeds, user is authenticated
+    const { userId, companyId, roleName } = await verifyUserAndGetProfile(supabase, request);
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    // Step 3: Parse request body (for excludeUserId)
+    const body = await request.json();
+    const { excludeUserId } = body;
 
-    if (!supabaseServiceKey) {
-      return NextResponse.json(
-        { error: 'Service role key not configured' },
-        { status: 500 }
-      );
-    }
-
-    // Use service role key to bypass RLS
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
-
-    // Fetch all profiles excluding the logged-in user
-    const { data: profilesData, error: profilesError } = await supabase
+    // Step 4: Query profiles using authenticated supabase client
+    // IMPORTANT: The RLS policy on profiles must allow company-level access:
+    // company_id = (SELECT company_id FROM profiles WHERE id = auth.uid())
+    // If RLS is set to (auth.uid() = id), employees won't show up!
+    let query = supabase
       .from('profiles')
       .select(`
         id,
         full_name,
+        phone_number,
         company_id,
         role_id,
-        phone_number,
         roles (
           role_name
         )
       `)
-      .neq('id', excludeUserId)
-      .order('full_name');
+      .eq('company_id', companyId)
+      .order('full_name', { ascending: true });
 
-    if (profilesError) {
-      console.error('Error fetching profiles:', profilesError);
+    // Exclude current user if requested
+    if (excludeUserId) {
+      query = query.neq('id', excludeUserId);
+    }
+
+    const { data: employees, error } = await query;
+
+
+    if (error) {
+      console.error('Error fetching employees:', error);
       return NextResponse.json(
-        { error: profilesError.message },
+        { error: error.message || 'Failed to fetch employees' },
         { status: 400 }
       );
     }
 
     return NextResponse.json({
-      profiles: profilesData || [],
+      success: true,
+      profiles: employees || [],
     });
   } catch (error: unknown) {
     console.error('API Error fetching employees:', error);
-    const errorMessage = error instanceof Error ? error.message : 'An error occurred';
+    
+    if (error instanceof Error && error.message?.includes('Unauthorized')) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 401 }
+      );
+    }
+    
     return NextResponse.json(
-      { error: errorMessage },
+      { error: error instanceof Error ? error.message : 'An error occurred' },
       { status: 500 }
     );
   }
 }
-

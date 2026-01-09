@@ -41,6 +41,8 @@ interface LedgerTemplateProps {
     companyEmail: string;
     gstNo: string;
     generatedDate: string;
+    fromDate?: string;
+    toDate?: string;
     salesExecutives: LedgerSalesExecutive[];
   };
 }
@@ -67,7 +69,10 @@ export const LedgerTemplate = ({ data }: LedgerTemplateProps) => {
             <Text style={styles.email}>E-Mail: {data.companyEmail}</Text>
           )}
           <Text style={styles.subtitle}>
-            SALESMAN WISE - CUSTOMER WISE LEDGERS AS ON : {data.generatedDate}
+            {data.fromDate && data.toDate 
+              ? `SALESMAN WISE - CUSTOMER WISE LEDGERS FROM : ${data.fromDate} TO : ${data.toDate}`
+              : `SALESMAN WISE - CUSTOMER WISE LEDGERS AS ON : ${data.generatedDate}`
+            }
           </Text>
         </View>
 
@@ -135,28 +140,75 @@ export const LedgerTemplate = ({ data }: LedgerTemplateProps) => {
             ))}
             
             {/* Total Work Orders Row */}
+            {/* Total Work Orders Row */}
             {(() => {
-              const totalOrders = executive.customers.reduce(
-                (sum, customer) => sum + customer.transactions.filter(t => t.type === 'ORDER').length,
-                0
-              );
+              const allTransactions = executive.customers.flatMap(c => c.transactions);
+              const totalOrders = allTransactions.filter(t => t.type === 'ORDER').length;
+              
+              const totalOrderCost = allTransactions.reduce((sum, t) => sum + (t.orderCost || 0), 0);
+              const totalReceived = allTransactions.reduce((sum, t) => sum + (t.receivedAmt || 0), 0);
+              const totalBalance = totalOrderCost - totalReceived;
+
               return (
                 <View style={styles.totalRow}>
-                  <Text style={[styles.cell, styles.colDate]}></Text>
-                  <Text style={[styles.cell, styles.colWorkOrder]}></Text>
-                  <Text style={[styles.cell, styles.colCustomer]}></Text>
+                  {/* Spanning cols for Total Label: Date(50) + WorkOrder(70) + Customer(130) + Town(85) + Mobile(90) + Item(65) + TrType(55) = 545 */}
+                  {/* But we want to span until the Amount columns. Let's just use flexGrow or specific width? 
+                      Actually, simpler to use empty cells or a spanning text if possible. 
+                      react-pdf doesn't support colSpan well in flex layouts. 
+                      Let's create cells matching the widths to align totals correctly. */}
+                  
+                  <Text style={[styles.cell, styles.colDate, styles.totalLabel]}></Text>
+                  <Text style={[styles.cell, styles.colWorkOrder, styles.totalLabel]}>TOTAL:</Text>
+                  <Text style={[styles.cell, styles.colCustomer, styles.totalLabel]}>{totalOrders} Orders</Text>
                   <Text style={[styles.cell, styles.colTown]}></Text>
                   <Text style={[styles.cell, styles.colMobile]}></Text>
                   <Text style={[styles.cell, styles.colItem]}></Text>
-                  <Text style={[styles.cell, styles.colType, styles.totalLabel]}>TOTAL</Text>
-                  <Text style={[styles.cell, styles.colAmount, styles.amountCell, styles.totalValue]}>{totalOrders}</Text>
-                  <Text style={[styles.cell, styles.colAmount]}></Text>
-                  <Text style={[styles.cell, styles.colAmount]}></Text>
+                  <Text style={[styles.cell, styles.colType]}></Text>
+                  
+                  <Text style={[styles.cell, styles.colAmount, styles.totalValue]}>
+                    {totalOrderCost.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Text>
+                  <Text style={[styles.cell, styles.colAmount, styles.totalValue]}>
+                    {totalReceived.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Text>
+                  <Text style={[styles.cell, styles.colAmount, styles.totalValue]}>
+                    {totalBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Text>
                 </View>
               );
             })()}
           </View>
         ))}
+
+        {/* Grand Totals Row (All Executives) */}
+        {(() => {
+          const allTransactions = data.salesExecutives.flatMap(e => e.customers.flatMap(c => c.transactions));
+          const grandTotalOrderCost = allTransactions.reduce((sum, t) => sum + (t.orderCost || 0), 0);
+          const grandTotalReceived = allTransactions.reduce((sum, t) => sum + (t.receivedAmt || 0), 0);
+          const grandTotalBalance = grandTotalOrderCost - grandTotalReceived;
+
+          return (
+            <View style={styles.grandTotalRow}>
+              <Text style={[styles.cell, styles.colDate, styles.grandTotalLabel]}></Text>
+              <Text style={[styles.cell, styles.colWorkOrder, styles.grandTotalLabel]}></Text>
+              <Text style={[styles.cell, styles.colCustomer, styles.grandTotalLabel]}></Text>
+              <Text style={[styles.cell, styles.colTown]}></Text>
+              <Text style={[styles.cell, styles.colMobile]}></Text>
+              <Text style={[styles.cell, styles.colItem]}></Text>
+              <Text style={[styles.cell, styles.colType]}></Text>
+              
+              <Text style={[styles.cell, styles.colAmount, styles.grandTotalValue]}>
+                {grandTotalOrderCost.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </Text>
+              <Text style={[styles.cell, styles.colAmount, styles.grandTotalValue]}>
+                {grandTotalReceived.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </Text>
+              <Text style={[styles.cell, styles.colAmount, styles.grandTotalValue]}>
+                {grandTotalBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </Text>
+            </View>
+          );
+        })()}
       </Page>
     </Document>
   );
@@ -258,6 +310,7 @@ const styles = StyleSheet.create({
     borderTop: '1 solid #000',
     borderBottom: '1 solid #000',
     paddingVertical: 4,
+    paddingHorizontal: 5,
   },
   totalLabel: {
     fontWeight: 'bold',
@@ -265,6 +318,30 @@ const styles = StyleSheet.create({
   },
   totalValue: {
     fontWeight: 'bold',
-    textAlign: 'center',
+    textAlign: 'right',
+  },
+
+  // Grand Total Styles
+  grandTotalRow: {
+    flexDirection: 'row',
+    backgroundColor: '#d3d3d3', // Light grey as requested
+    marginTop: 10,
+    borderTop: '1 solid #000',
+    borderBottom: '1 solid #000',
+    paddingVertical: 6,
+    paddingHorizontal: 5,
+  },
+  grandTotalLabel: {
+    color: '#000',
+    fontWeight: 'bold',
+    fontSize: 9,
+    textAlign: 'left',
+  },
+  grandTotalValue: {
+    color: '#000',
+    fontWeight: 'bold',
+    fontSize: 9,
+    textAlign: 'right',
   },
 });
+

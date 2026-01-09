@@ -14,6 +14,15 @@ export interface WhatsAppMessageParams {
   mentions?: string[]; // Array of phone numbers to mention in group messages
 }
 
+export interface WhatsAppDocumentParams {
+  to: string;
+  media: string; // URL or base64 of the document
+  filename?: string;
+  caption?: string;
+  mime_type?: string;
+}
+
+
 export interface WhatsAppResponse {
   success: boolean;
   messageId?: string;
@@ -225,13 +234,82 @@ export async function sendWhatsAppMessage(
       messageId: messageId,
     };
   } catch (error) {
-    // Network/system errors are also observations, not failures
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     console.warn('[WhatsApp API] Network/system error (observational):', errorMessage);
     return {
       success: false,
       error: `Network/system error: ${errorMessage}`,
     };
+  }
+}
+
+
+/**
+ * Sends a WhatsApp document message via Whapi.Cloud API
+ * 
+ * @param params - Document parameters (to, media, filename, caption)
+ * @param apiToken - Whapi.Cloud API token
+ * @returns Promise with response data
+ */
+export async function sendWhatsAppDocument(
+  params: WhatsAppDocumentParams,
+  apiToken?: string
+): Promise<WhatsAppResponse> {
+  const token = apiToken || process.env.WHAPI_CLOUD_API_TOKEN;
+  
+  if (!token) {
+    return {
+      success: false,
+      error: 'WHAPI_CLOUD_API_TOKEN is not configured',
+    };
+  }
+
+  if (!isValidPhoneNumber(params.to)) {
+    return {
+      success: false,
+      error: `Invalid phone number: ${params.to}`,
+    };
+  }
+
+  const formattedPhone = formatPhoneNumber(params.to);
+
+  try {
+    const requestBody: any = {
+      to: formattedPhone,
+      media: params.media,
+    };
+
+    if (params.filename) requestBody.filename = params.filename;
+    if (params.caption) requestBody.caption = params.caption;
+    if (params.mime_type) requestBody.mime_type = params.mime_type;
+
+    console.log('[WhatsApp API] Attempting to send document to:', formattedPhone.substring(0, 4) + '****');
+
+    const response = await fetch('https://gate.whapi.cloud/messages/document', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      const errorMessage = data.error?.message || data.error || data.message || `HTTP ${response.status}`;
+      console.warn('[WhatsApp API] Document send failed (expected volatility):', errorMessage);
+      return { success: false, error: errorMessage };
+    }
+
+    return {
+      success: true,
+      messageId: data.id || data.message_id,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.warn('[WhatsApp API] Document network error:', errorMessage);
+    return { success: false, error: errorMessage };
   }
 }
 

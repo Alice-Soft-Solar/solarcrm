@@ -1,12 +1,11 @@
 'use client';
 
-import { createClient } from '@supabase/supabase-js';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useMemo, Suspense } from 'react';
 import DashboardLayout from '@/components/layouts/DashboardLayout';
 import { LoadingSpinner } from '@/components/ui';
 import StatCard from '@/components/dashboard/StatCard';
-import { getAccessToken } from '@/lib/supabase-client';
+import { getAccessToken, getSupabaseClient } from '@/lib/supabase-client';
 import ChartCard from '@/components/dashboard/ChartCard';
 import {
   BarChart,
@@ -72,6 +71,7 @@ interface DashboardStats {
     todayReceived: number;
     monthlyReceived: number;
     pending: number;
+    totalOrderValue: number; // Add this field
     totalCount?: number; // For Accounts role
   };
   dispatch: {
@@ -114,9 +114,7 @@ function DashboardContent() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  const supabase = useMemo(() => createClient(supabaseUrl, supabaseKey), [supabaseUrl, supabaseKey]);
+  const supabase = useMemo(() => getSupabaseClient(), []);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -148,11 +146,15 @@ function DashboardContent() {
           return;
         }
 
-        const roles = profileData.roles as { role_name: string } | { role_name: string }[];
+        const profileDataTyped = profileData as any;
+        const roles = profileDataTyped.roles as { role_name: string } | { role_name: string }[];
         const roleData = Array.isArray(roles) ? roles[0] : roles;
 
         const normalizedProfile: Profile = {
-          ...profileData,
+          id: profileDataTyped.id,
+          full_name: profileDataTyped.full_name,
+          company_id: profileDataTyped.company_id,
+          role_id: profileDataTyped.role_id,
           roles: roleData || { role_name: '' },
         };
 
@@ -171,7 +173,7 @@ function DashboardContent() {
         const filterSalesExecutive = searchParams.get('salesExecutive') || '';
         const filterPlantCapacity = searchParams.get('plantCapacity') || '';
 
-        const accessToken = getAccessToken();
+        const accessToken = await getAccessToken();
         const statsResponse = await fetch('/api/dashboard/stats', {
           method: 'POST',
           headers: {
@@ -283,6 +285,7 @@ function DashboardContent() {
                       title="Total Leads"
                       value={stats?.myLeads?.total || 0}
                       subtitle="My leads"
+                      onClick={() => router.push('/dashboard/leads')}
                       icon={
                         <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -334,6 +337,7 @@ function DashboardContent() {
                       title="Total Leads"
                       value={stats?.teamLeads?.total || 0}
                       subtitle="Team leads"
+                      onClick={() => router.push('/dashboard/leads')}
                       icon={
                         <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -384,8 +388,9 @@ function DashboardContent() {
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   <StatCard
                     title="Total Leads"
-                    value={stats?.leads.total || 0}
+                    value={stats?.leads?.total || 0}
                     subtitle="All leads"
+                    onClick={() => router.push('/dashboard/leads')}
                     icon={
                       <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -395,7 +400,7 @@ function DashboardContent() {
                   />
                   <StatCard
                     title="Interested"
-                    value={stats?.leads.interested || 0}
+                    value={stats?.leads?.interested || 0}
                     subtitle="Potential customers"
                     icon={
                       <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -406,7 +411,7 @@ function DashboardContent() {
                   />
                   <StatCard
                     title="Not Interested"
-                    value={stats?.leads.notInterested || 0}
+                    value={stats?.leads?.notInterested || 0}
                     subtitle="Closed leads"
                     icon={
                       <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -417,7 +422,7 @@ function DashboardContent() {
                   />
                   <StatCard
                     title="Follow Up Required"
-                    value={stats?.leads.followUpRequired || 0}
+                    value={stats?.leads?.followUpRequired || 0}
                     subtitle="Needs attention"
                     icon={
                       <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -436,11 +441,12 @@ function DashboardContent() {
         {showWorkOrdersSection && (
           <div>
             <h2 className="text-xl font-semibold text-foreground mb-4">Work Orders Overview</h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
               <StatCard
                 title="Total Work Orders"
                 value={stats.workOrders.total || 0}
                 subtitle="All time"
+                onClick={() => router.push('/dashboard/work-orders/list')}
                 icon={
                   <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -482,6 +488,17 @@ function DashboardContent() {
                 color="green"
               />
               <StatCard
+                title="Advance Paid"
+                value={(stats.workOrders as any).advancePaid || 0}
+                subtitle="Payment confirmed"
+                icon={
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                }
+                color="blue"
+              />
+              <StatCard
                 title="Closed"
                 value={stats.workOrders.closed || 0}
                 subtitle="Completed orders"
@@ -505,6 +522,7 @@ function DashboardContent() {
                 title="Total Work Orders"
                 value={stats.workOrders?.total || 0}
                 subtitle="All work orders"
+                onClick={() => router.push('/dashboard/work-orders/list')}
                 icon={
                   <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -541,11 +559,22 @@ function DashboardContent() {
         {/* KPI Cards - Payments */}
         {isAdmin && (
           <div>
-            <h2 className="text-xl font-semibold text-foreground mb-4">Payments Dashboard</h2>
+            <h2 className="text-xl font-semibold text-foreground mb-4">Payments Overview</h2>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <StatCard
+                title="Total Received"
+                value={formatCurrency((stats?.payments as any)?.totalReceived || 0)}
+                subtitle="All time collections"
+                icon={
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                }
+                color="blue"
+              />
+              <StatCard
                 title="Received Today"
-                value={formatCurrency(stats?.payments.todayReceived || 0)}
+                value={formatCurrency((stats?.payments as any)?.todayReceived || 0)}
                 subtitle="Today's collections"
                 icon={
                   <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -555,9 +584,9 @@ function DashboardContent() {
                 color="green"
               />
               <StatCard
-                title="Monthly Received"
-                value={formatCurrency(stats?.payments.monthlyReceived || 0)}
-                subtitle="This month"
+                title="Total This Month"
+                value={formatCurrency((stats?.payments as any)?.monthlyReceived || 0)}
+                subtitle={`For ${new Date().toLocaleString('default', { month: 'long' })}`}
                 icon={
                   <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -575,6 +604,17 @@ function DashboardContent() {
                   </svg>
                 }
                 color="red"
+              />
+              <StatCard
+                title="Total Order Value"
+                value={formatCurrency(stats?.payments.totalOrderValue || 0)}
+                subtitle="Total value of all orders"
+                icon={
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                  </svg>
+                }
+                color="purple"
               />
             </div>
           </div>
@@ -663,11 +703,20 @@ function DashboardContent() {
                     dataKey="value"
                   >
                     {statusChartData.map((entry, index) => {
-                      const gradientId =
-                        entry.name === 'Pending' ? 'colorPending' :
-                          entry.name === 'To Be Dispatched' ? 'colorToBeDispatched' :
-                            entry.name === 'Dispatched' ? 'colorDispatched' :
-                              'colorClosed';
+                      const getStatusColor = (name: string) => {
+                        switch (name) {
+                          case 'Pending': return 'colorPending';
+                          case 'To Be Dispatched': return 'colorToBeDispatched';
+                          case 'Dispatched': return 'colorDispatched';
+                          case 'Closed':
+                          case 'Completed': return 'colorClosed';
+                          case 'Interested': return 'colorDispatched';
+                          case 'Not Interested': return 'colorClosed';
+                          case 'Follow Up Required': return 'colorPending';
+                          default: return 'colorClosed';
+                        }
+                      };
+                      const gradientId = getStatusColor(entry.name);
                       return (
                         <Cell
                           key={`cell-${index}`}

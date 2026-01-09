@@ -1,11 +1,36 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient, verifyUserAndGetProfile, isAdmin } from '@/lib/supabase-server';
+
+/**
+ * API Route: Delete Employee
+ * 
+ * Security: Proxies to Supabase Edge Function
+ * - Only Admin/Super Admin can delete employees
+ * - Calls edge function which has service role access in Supabase backend
+ */
+
+const EDGE_FUNCTION_URL = 'https://xjgzudgmtbgitxcnklbm.supabase.co/functions/v1/delete-user';
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { user_id } = await request.json();
+    // Step 1: Create authenticated Supabase client
+    const supabase = await createServerClient(request);
 
-    // Validate required fields
+    // Step 2: Verify user and get verified profile/role
+    const { userId, companyId, roleName } = await verifyUserAndGetProfile(supabase, request);
+
+    // Step 3: Check authorization - only Admin and Super Admin can delete
+    if (!isAdmin(roleName)) {
+      return NextResponse.json(
+        { error: 'Unauthorized: Only Admin and Super Admin can delete employees' },
+        { status: 403 }
+      );
+    }
+
+    // Step 4: Parse request body
+    const body = await request.json();
+    const { user_id } = body;
+
     if (!user_id) {
       return NextResponse.json(
         { error: 'User ID is required' },
@@ -13,56 +38,44 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    // Step 5: Delete profile first (RLS enforced)
+    // RLS ensures we can only delete profiles in our company
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', user_id);
 
-    if (!supabaseServiceKey) {
+    if (profileError) {
+      console.error('Error deleting profile:', profileError);
       return NextResponse.json(
-        { error: 'Service role key not configured' },
-        { status: 500 }
+        { error: profileError.message || 'Failed to delete employee profile' },
+        { status: 400 }
       );
     }
 
-    // Use service role key to bypass RLS
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
+    // Step 6: Call Supabase Edge Function to delete auth user
+    // Edge function has service role access in secure backend environment
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    
+    if (!supabaseAnonKey) {
+      throw new Error('Supabase anon key not configured');
+    }
+
+    const response = await fetch(EDGE_FUNCTION_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': supabaseAnonKey,
+        'Authorization': `Bearer ${supabaseAnonKey}`,
       },
+      body: JSON.stringify({ user_id }),
     });
 
-    // First, check if profile exists
-    const { data: profile, error: fetchError } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('id', user_id)
-      .single();
-
-    if (fetchError || !profile) {
-      return NextResponse.json(
-        { error: 'Employee not found' },
-        { status: 404 }
-      );
-    }
-
-    // Delete from auth.users first (this will cascade to profiles if foreign key is set up)
-    // If not, delete from profiles manually
-    const { error: deleteAuthError } = await supabase.auth.admin.deleteUser(user_id);
-
-    if (deleteAuthError) {
-      console.error('Error deleting user from auth:', deleteAuthError);
-      // Try to delete from profiles table directly
-      const { error: deleteProfileError } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', user_id);
-
-      if (deleteProfileError) {
-        return NextResponse.json(
-          { error: deleteProfileError.message || 'Failed to delete employee' },
-          { status: 400 }
-        );
-      }
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      console.error('Edge function error:', errorData);
+      // Auth user delete failed, but profile is already deleted - log warning
+      console.warn('Profile deleted but auth user deletion failed:', errorData.error);
     }
 
     return NextResponse.json({
@@ -71,16 +84,17 @@ export async function DELETE(request: NextRequest) {
     });
   } catch (error: unknown) {
     console.error('API Error deleting employee:', error);
-    const errorMessage = error instanceof Error ? error.message : 'An error occurred';
+    
+    if (error instanceof Error && error.message?.includes('Unauthorized')) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 401 }
+      );
+    }
+    
     return NextResponse.json(
-      { error: errorMessage },
+      { error: error instanceof Error ? error.message : 'An error occurred' },
       { status: 500 }
     );
   }
 }
-
-
-
-
-
-

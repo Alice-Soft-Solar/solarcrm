@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, verifyUserAndGetProfile } from '@/lib/supabase-server';
-import { createClient } from '@supabase/supabase-js';
 import React from 'react';
 import { pdf, DocumentProps } from '@react-pdf/renderer';
 import { LedgerTemplate } from '@/components/LedgerTemplate';
@@ -117,14 +116,8 @@ export async function POST(request: NextRequest) {
       targetSalesExecutiveName = body.sales_executive_name;
     }
 
-    // Step 5: Create service role client to bypass RLS for data fetching
-    const adminSupabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    // Step 6: Fetch company details
-    const { data: company, error: companyError } = await adminSupabase
+    // Step 5: Fetch company details (using authenticated supabase)
+    const { data: company, error: companyError } = await supabase
       .from('companies')
       .select('name, company_address, company_phone1, company_phone2, company_email, gst_no')
       .eq('id', companyId)
@@ -138,7 +131,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Step 7: Get sales executive ID from name
-    const { data: targetProfile, error: targetProfileError } = await adminSupabase
+    const { data: targetProfile, error: targetProfileError } = await supabase
       .from('profiles')
       .select('id, full_name')
       .eq('company_id', companyId)
@@ -153,7 +146,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Step 8: Fetch work orders for this sales executive only
-    const { data: workOrders, error: workOrdersError } = await adminSupabase
+    const { data: workOrders, error: workOrdersError } = await supabase
       .from('work_orders')
       .select(`
         id,
@@ -162,6 +155,7 @@ export async function POST(request: NextRequest) {
         customer_address,
         customer_phone,
         plant_capacity,
+        town,
         order_amount,
         created_at,
         sales_executive_id
@@ -212,7 +206,7 @@ export async function POST(request: NextRequest) {
 
     // Step 9: Fetch all payments for these work orders
     const workOrderIds = workOrders.map(wo => wo.id);
-    const { data: payments, error: paymentsError } = await adminSupabase
+    const { data: payments, error: paymentsError } = await supabase
       .from('payments_data')
       .select('id, work_order_id, amount, transaction_date, payment_method')
       .in('work_order_id', workOrderIds)
@@ -287,7 +281,7 @@ export async function POST(request: NextRequest) {
       // Add customer
       customers.push({
         name: workOrder.customer_name,
-        town: extractTown(workOrder.customer_address || ''),
+        town: workOrder.town || '-',
         mobile: workOrder.customer_phone || '',
         transactions,
       });

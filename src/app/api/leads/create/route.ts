@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient, verifyUserAndGetProfile, getServiceClient, hasRole, isAdmin as checkIsAdmin, isSalesLead as checkIsSalesLead, isSales as checkIsSales } from '@/lib/supabase-server';
+import { createServerClient, verifyUserAndGetProfile, hasRole, isAdmin as checkIsAdmin, isSalesLead as checkIsSalesLead, isSales as checkIsSales } from '@/lib/supabase-server';
 
 /**
  * API route to create a new lead
@@ -67,14 +67,25 @@ export async function POST(request: NextRequest) {
     // Step 8: Upload photo to storage (service role for bucket access only)
     let photo_url: string | null = null;
     if (photo && photo.size > 0) {
-      const serviceSupabase = getServiceClient();
-      const fileExt = photo.name.split('.').pop() || 'jpg';
+      console.log('Photo received:', {
+        name: photo.name,
+        size: photo.size,
+        type: photo.type,
+      });
+      
+      const fileExt = photo.name?.split('.').pop()?.toLowerCase() || 'jpg';
       const fileName = `${userId}-${Date.now()}.${fileExt}`;
       const filePath = `${companyId}/leads/${fileName}`;
+      
+      console.log('Uploading photo to:', filePath);
 
-      const { error: uploadError } = await serviceSupabase.storage
+      // Convert File to ArrayBuffer for upload
+      const arrayBuffer = await photo.arrayBuffer();
+      const buffer = new Uint8Array(arrayBuffer);
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
         .from('work-order-docs')
-        .upload(filePath, photo, {
+        .upload(filePath, buffer, {
           cacheControl: '3600',
           upsert: false,
           contentType: photo.type || 'image/jpeg',
@@ -88,11 +99,13 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const { data: publicUrlData } = serviceSupabase.storage
-        .from('work-order-docs')
-        .getPublicUrl(filePath);
+      console.log('Upload successful:', uploadData);
 
-      photo_url = publicUrlData.publicUrl || null;
+      // Store just the file path - the frontend will generate signed URLs
+      photo_url = filePath;
+      console.log('Stored photo_url:', photo_url);
+    } else {
+      console.log('No photo provided or photo size is 0');
     }
 
     // Step 9: Insert lead (RLS enforced - must match user's company_id)

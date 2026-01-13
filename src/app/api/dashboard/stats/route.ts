@@ -55,84 +55,84 @@ export async function POST(request: NextRequest) {
           // Sales Lead: Calculate separate stats for "My Leads" and "Team Leads"
 
           // My Leads: Leads created by the Sales Lead (creator_id = userId)
-          const myLeadsQuery = supabase
-            .from('leads')
-            .select('id, status')
-            .eq('company_id', companyId)
-            .eq('creator_id', userId);
+          // My Leads: Leads created by the Sales Lead (creator_id = userId)
+          const getMyLeadsQuery = () => supabase.from('leads').select('*', { count: 'exact', head: true }).eq('company_id', companyId).eq('creator_id', userId);
+          
+          const [myTotalRes, myInterestedRes, myNotInterestedRes, myFollowUpRes] = await Promise.all([
+            getMyLeadsQuery(),
+            getMyLeadsQuery().eq('status', 'Interested'),
+            getMyLeadsQuery().eq('status', 'Not Interested'),
+            getMyLeadsQuery().eq('status', 'Follow Up Required')
+          ]);
 
-          const { data: myLeadsData, error: myLeadsError } = await myLeadsQuery;
+          if (myTotalRes.error) console.error('Error fetching my leads stats:', myTotalRes.error);
 
-          if (myLeadsError) {
-            console.error('Error fetching my leads stats:', myLeadsError);
-          } else if (myLeadsData) {
-            const myTotal = myLeadsData.length;
-            const myInterested = myLeadsData.filter(l => l.status === 'Interested').length;
-            const myNotInterested = myLeadsData.filter(l => l.status === 'Not Interested').length;
-            const myFollowUpRequired = myLeadsData.filter(l => l.status === 'Follow Up Required').length;
+          const myStats = {
+            total: myTotalRes.count || 0,
+            interested: myInterestedRes.count || 0,
+            notInterested: myNotInterestedRes.count || 0,
+            followUpRequired: myFollowUpRes.count || 0
+          };
+          
+          console.log('[LEADS DEBUG] SalesLead MyLeads Stats:', JSON.stringify(myStats));
 
-            response.stats.myLeads = {
-              total: myTotal,
-              interested: myInterested,
-              notInterested: myNotInterested,
-              followUpRequired: myFollowUpRequired,
-            };
-          }
+          response.stats.myLeads = myStats;
 
           // Team Leads: All leads from the same company (all company leads)
-          const teamLeadsQuery = supabase
-            .from('leads')
-            .select('id, status')
-            .eq('company_id', companyId);
+          const getTeamLeadsQuery = () => supabase.from('leads').select('*', { count: 'exact', head: true }).eq('company_id', companyId);
 
-          const { data: teamLeadsData, error: teamLeadsError } = await teamLeadsQuery;
+          const [teamTotalRes, teamInterestedRes, teamNotInterestedRes, teamFollowUpRes] = await Promise.all([
+            getTeamLeadsQuery(),
+            getTeamLeadsQuery().eq('status', 'Interested'),
+            getTeamLeadsQuery().eq('status', 'Not Interested'),
+            getTeamLeadsQuery().eq('status', 'Follow Up Required')
+          ]);
 
-          if (teamLeadsError) {
-            console.error('Error fetching team leads stats:', teamLeadsError);
-          } else if (teamLeadsData) {
-            const teamTotal = teamLeadsData.length;
-            const teamInterested = teamLeadsData.filter(l => l.status === 'Interested').length;
-            const teamNotInterested = teamLeadsData.filter(l => l.status === 'Not Interested').length;
-            const teamFollowUpRequired = teamLeadsData.filter(l => l.status === 'Follow Up Required').length;
+          if (teamTotalRes.error) console.error('Error fetching team leads stats:', teamTotalRes.error);
 
-            response.stats.teamLeads = {
-              total: teamTotal,
-              interested: teamInterested,
-              notInterested: teamNotInterested,
-              followUpRequired: teamFollowUpRequired,
-            };
-          }
+          const teamStats = {
+            total: teamTotalRes.count || 0,
+            interested: teamInterestedRes.count || 0,
+            notInterested: teamNotInterestedRes.count || 0,
+            followUpRequired: teamFollowUpRes.count || 0
+          };
+
+          console.log('[LEADS DEBUG] SalesLead TeamLeads Stats:', JSON.stringify(teamStats));
+
+          response.stats.teamLeads = teamStats;
         } else {
           // For other roles (Sales, Admin, Super Admin): Single leads stats
-          let leadsQuery = supabase.from('leads').select('id, status');
+          const getLeadsQuery = () => {
+             let q = supabase.from('leads').select('*', { count: 'exact', head: true });
+             
+             // Apply role-based filters
+             if (isSales) {
+               q = q.eq('creator_id', userId);
+             } else if (isAdmin) {
+               q = q.eq('company_id', companyId);
+             }
+             return q;
+          };
 
-          // For Sales: Only their own leads
-          if (isSales) {
-            leadsQuery = leadsQuery.eq('creator_id', userId);
-          } else if (isAdmin) {
-            // For Admin: All company leads
-            leadsQuery = leadsQuery.eq('company_id', companyId);
-          }
+          const [totalRes, interestedRes, notInterestedRes, followUpRes] = await Promise.all([
+            getLeadsQuery(),
+            getLeadsQuery().eq('status', 'Interested'),
+            getLeadsQuery().eq('status', 'Not Interested'),
+            getLeadsQuery().eq('status', 'Follow Up Required')
+          ]);
 
-          // Execute query (RLS handles additional filtering)
-          const { data: leadsData, error: leadsError } = await leadsQuery;
+          if (totalRes.error) console.error('Error fetching leads stats:', totalRes.error);
 
-          if (leadsError) {
-            console.error('Error fetching leads stats:', leadsError);
-          } else if (leadsData) {
-            // Calculate statistics
-            const total = leadsData.length;
-            const interested = leadsData.filter(l => l.status === 'Interested').length;
-            const notInterested = leadsData.filter(l => l.status === 'Not Interested').length;
-            const followUpRequired = leadsData.filter(l => l.status === 'Follow Up Required').length;
+          const stats = {
+            total: totalRes.count || 0,
+            interested: interestedRes.count || 0,
+            notInterested: notInterestedRes.count || 0,
+            followUpRequired: followUpRes.count || 0
+          };
 
-            response.stats.leads = {
-              total,
-              interested,
-              notInterested,
-              followUpRequired,
-            };
-          }
+          console.log('[LEADS DEBUG] General Leads Stats:', JSON.stringify(stats));
+
+          response.stats.leads = stats;
         }
       } catch (err) {
         console.error('Exception fetching leads stats:', err);

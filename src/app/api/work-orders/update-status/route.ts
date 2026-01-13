@@ -51,6 +51,14 @@ export async function PUT(request: NextRequest) {
     
     if (work_order_status !== undefined) {
       updateData.work_order_status = work_order_status;
+      
+      // Automatically set timestamps based on status change
+      const now = new Date().toISOString();
+      if (work_order_status === 'To Be Dispatched') {
+        updateData.to_be_dispatched_at = now;
+      } else if (work_order_status === 'Dispatched') {
+        updateData.dispatched_at = now;
+      }
     }
     
     if (subsidy_amount !== undefined) {

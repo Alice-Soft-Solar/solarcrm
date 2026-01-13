@@ -195,7 +195,7 @@ export async function GET(request: NextRequest) {
         .select(`
           *,
           profiles:sales_executive_id (full_name),
-          payments:payments_data (amount, first_payment, second_payment, final_payment, additional_payment)
+          payments:payments_data (amount, first_payment, second_payment, final_payment, additional_payment, transaction_date)
         `)
         .eq('company_id', companyId);
 
@@ -248,13 +248,59 @@ export async function GET(request: NextRequest) {
       reportData = data.map((wo: any) => {
         const totalPaid = calculateTotalPaid(wo.payments);
         const balance = wo.order_amount - totalPaid;
+        
+        // Find advance payment date (robust logic: sort by date and take first)
+        let advance_paid_at = null;
+        if (wo.payments && wo.payments.length > 0) {
+           // Sort payments by transaction_date (ascending)
+           const sortedPayments = [...wo.payments].sort((a: any, b: any) => {
+             const dateA = new Date(a.transaction_date || 0).getTime();
+             const dateB = new Date(b.transaction_date || 0).getTime();
+             return dateA - dateB;
+           });
+           
+           // Use the earliest payment date
+           if (sortedPayments[0] && sortedPayments[0].transaction_date) {
+             advance_paid_at = sortedPayments[0].transaction_date;
+           }
+           
+           // DEBUG: Log for specific work order to verify
+           if (wo.work_order_number === 'GMS25120001') {
+             console.log('[REPORT DEBUG] WO GMS25120001 Payments:', JSON.stringify(wo.payments));
+             console.log('[REPORT DEBUG] Calculated Advance Date:', advance_paid_at);
+           }
+        }
+
+        // Logic to infer 'To Be Dispatched' date from payments (when 65% reached)
+        let calculated_to_dispatch_at = null;
+        if (wo.payments && wo.order_amount > 0) {
+           // Reuse sorted payments from above or sort if needed
+           const sortedPayments = [...wo.payments].sort((a: any, b: any) => {
+             const dateA = new Date(a.transaction_date || 0).getTime();
+             const dateB = new Date(b.transaction_date || 0).getTime();
+             return dateA - dateB;
+           });
+
+           let runningTotal = 0;
+           for (const p of sortedPayments) {
+             runningTotal += parseFloat(p.amount || '0');
+             if (runningTotal / wo.order_amount >= 0.65) {
+               calculated_to_dispatch_at = p.transaction_date;
+               break; // Found the date we crossed 65%
+             }
+           }
+        }
+
         return {
           ...wo,
           town: wo.town || '-', // Use the town field directly from database
           totalPaid,
           balance,
           paymentPercentage: calculatePaymentPercentage(totalPaid, wo.order_amount),
-          executiveName: wo.profiles?.full_name || 'Unassigned'
+          executiveName: wo.profiles?.full_name || 'Unassigned',
+          advance_paid_at, // Map calculated advance date
+          to_be_dispatched_at: wo.to_be_dispatched_at || calculated_to_dispatch_at, // Use DB date or inferred date
+          completed_at: wo.meter_completed_at // Map completion date
         };
       });
     }

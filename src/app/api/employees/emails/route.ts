@@ -9,7 +9,7 @@ import { createServerClient, verifyUserAndGetProfile } from '@/lib/supabase-serv
  * - Calls edge function which has service role access in Supabase backend
  */
 
-const EDGE_FUNCTION_URL = 'https://xjgzudgmtbgitxcnklbm.supabase.co/functions/v1/get-user-emails';
+const EDGE_FUNCTION_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/get-user-emails`;
 
 export async function POST(request: NextRequest) {
   try {

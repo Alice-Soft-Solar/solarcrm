@@ -9,7 +9,7 @@ import { createServerClient, verifyUserAndGetProfile, isAdmin } from '@/lib/supa
  * - Calls edge function which has service role access in Supabase backend
  */
 
-const EDGE_FUNCTION_URL = 'https://xjgzudgmtbgitxcnklbm.supabase.co/functions/v1/delete-user';
+const EDGE_FUNCTION_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/delete-user`;
 
 export async function DELETE(request: NextRequest) {
   try {

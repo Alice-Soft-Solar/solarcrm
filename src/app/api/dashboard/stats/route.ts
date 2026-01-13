@@ -23,6 +23,8 @@ export async function POST(request: NextRequest) {
 
     // Step 2: Verify user and get verified profile/role from database
     const { userId, companyId, roleName } = await verifyUserAndGetProfile(supabase, request);
+    
+    console.log('[DEBUG] User Verification - userId:', userId, 'companyId:', companyId, 'roleName:', roleName);
 
     // Step 3: Determine role-based access
     const isAdmin = checkIsAdmin(roleName);
@@ -221,10 +223,9 @@ export async function POST(request: NextRequest) {
             });
             console.log('[DASHBOARD STATS DEBUG] Status-wise Amounts:', statusAmounts);
 
+            // Include all orders except explicitly cancelled/rejected ones
+            // This ensures orders with NULL status or "To Be Dispatched" are counted
             const activeOrders = workOrdersData.filter((w: any) => 
-              w.work_order_status && 
-              w.work_order_status !== 'Created' && // EXCLUDE 'Created'
-              w.work_order_status !== 'To Be Dispatched' && // EXCLUDE 'To Be Dispatched' as they are often pre-payment test/lead orders
               w.work_order_status !== 'Cancelled' && 
               w.work_order_status !== 'Rejected' &&
               w.work_order_status !== 'Order Cancelled'
@@ -303,10 +304,18 @@ export async function POST(request: NextRequest) {
     // Step 7: Fetch payments statistics (Admin and Accounts)
     if (isAdmin) {
       try {
+        console.log('[DEBUG] Fetching payments for companyId:', companyId);
         const { data: paymentsData, error: paymentsError } = await supabase
           .from('payments_data')
           .select('amount, transaction_date, work_order_id, work_orders!inner(company_id)')
           .eq('work_orders.company_id', companyId);
+
+        console.log('[DEBUG] Payments Query Result - Data Count:', paymentsData?.length || 0);
+        console.log('[DEBUG] Payments Query Error:', paymentsError);
+        if (paymentsData && paymentsData.length > 0) {
+          const totalAmount = paymentsData.reduce((sum, p) => sum + (parseFloat(p.amount?.toString() || '0')), 0);
+          console.log('[DEBUG] Total Payment Amount:', totalAmount);
+        }
 
         if (paymentsError) {
           console.error('Error fetching payments stats:', paymentsError);
@@ -336,6 +345,8 @@ export async function POST(request: NextRequest) {
             pending: Math.max(0, totalOrderAmount - totalReceived),
             totalOrderValue: totalOrderAmount, // Add this field
           };
+          
+          console.log('[DEBUG] Final Payment Stats:', response.stats.payments);
 
           // Build payments by day chart data (last 7 days)
           const paymentsByDay: { date: string; amount: number }[] = [];

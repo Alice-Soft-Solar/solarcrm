@@ -41,7 +41,6 @@ interface Profile {
 export default function ViewLeadsPage() {
   const router = useRouter();
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [allLeads, setAllLeads] = useState<Lead[]>([]); // Store all leads for client-side filtering
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -178,49 +177,7 @@ export default function ViewLeadsPage() {
     if (!profile) return;
 
     fetchLeads();
-  }, [profile, filterExecutive, filterStatus, filterVisitStatus, filterSingleDate, filterDateFrom, filterDateTo]);
-
-  // Client-side filtering for search query (like work orders)
-  useEffect(() => {
-    if (!allLeads.length) {
-      setLeads([]);
-      setPagination(prev => ({ ...prev, total: 0, totalPages: 0 }));
-      return;
-    }
-
-    let filtered = [...allLeads];
-
-    // Apply search query (searches across multiple fields including phone)
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
-      filtered = filtered.filter(lead => {
-        // Convert phone to string for searching (handles numeric phone numbers)
-        const phoneStr = String(lead.customer_phone || '').toLowerCase();
-        const customerName = (lead.customer_name || '').toLowerCase();
-        const customerAddress = (lead.customer_address || '').toLowerCase();
-        
-        return (
-          customerName.includes(query) ||
-          customerAddress.includes(query) ||
-          phoneStr.includes(query)
-        );
-      });
-    }
-
-    // Apply pagination to filtered results
-    const pageSize = pagination.limit;
-    const pageNumber = pagination.page;
-    const from = (pageNumber - 1) * pageSize;
-    const to = from + pageSize;
-    const paginatedLeads = filtered.slice(from, to);
-
-    setLeads(paginatedLeads);
-    setPagination(prev => ({
-      ...prev,
-      total: filtered.length,
-      totalPages: Math.ceil(filtered.length / pageSize),
-    }));
-  }, [allLeads, searchQuery, pagination.page, pagination.limit]);
+  }, [profile, filterExecutive, filterStatus, filterVisitStatus, filterSingleDate, filterDateFrom, filterDateTo, pagination.page, searchQuery]);
 
   const fetchLeads = async () => {
     if (!profile) return;
@@ -239,8 +196,8 @@ export default function ViewLeadsPage() {
         },
         body: JSON.stringify({
           ...(accessToken && { access_token: accessToken }),
-          page: 1,
-          limit: 10000, // Fetch all leads (large limit to get all)
+          page: pagination.page,
+          limit: pagination.limit,
           filters: {
             executiveId: filterExecutive,
             status: filterStatus,
@@ -248,6 +205,7 @@ export default function ViewLeadsPage() {
             singleDate: filterSingleDate,
             dateFrom: filterDateFrom,
             dateTo: filterDateTo,
+            search: searchQuery,
           },
         }),
       });
@@ -259,10 +217,9 @@ export default function ViewLeadsPage() {
         return;
       }
 
-      // Store all leads for client-side filtering (like work orders)
-      const fetchedLeads = json.leads || [];
-      setAllLeads(fetchedLeads);
-      // The client-side filtering useEffect will handle setting leads and pagination
+      // Set leads and pagination directly from API response
+      setLeads(json.leads || []);
+      setPagination(json.pagination);
     } catch (err: unknown) {
       console.error('Error fetching leads:', err);
       alert(err instanceof Error ? err.message : 'Failed to fetch leads');
@@ -619,14 +576,9 @@ export default function ViewLeadsPage() {
         } : {}),
       };
 
-      // Update both leads and allLeads arrays immediately (optimistic update)
+      // Update leads array immediately (optimistic update)
       setLeads(prevLeads => 
         prevLeads.map(lead => 
-          lead.id === editingLead.id ? updatedLead : lead
-        )
-      );
-      setAllLeads(prevAllLeads => 
-        prevAllLeads.map(lead => 
           lead.id === editingLead.id ? updatedLead : lead
         )
       );
@@ -961,7 +913,7 @@ export default function ViewLeadsPage() {
                           {lead.executive_name || 'N/A'}
                         </td>
                       )}
-                      <td className="px-6 py-4 text-sm text-foreground">
+                      <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground max-w-[150px] overflow-hidden text-ellipsis">
                         {lead.customer_name || 'N/A'}
                       </td>
                       <td 
@@ -1083,7 +1035,7 @@ export default function ViewLeadsPage() {
                       <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground">
                         {lead.power_units || 'N/A'}
                       </td>
-                      <td className="px-6 py-4 text-sm text-foreground max-w-xs truncate">
+                      <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground max-w-xs truncate" title={lead.customer_address || 'N/A'}>
                         {lead.customer_address || 'N/A'}
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground">
@@ -1160,24 +1112,44 @@ export default function ViewLeadsPage() {
 
         {/* Pagination */}
         {pagination.totalPages > 1 && (
-          <div className="mt-6 flex items-center justify-between">
+          <div className="mt-8 flex items-center justify-between">
             <div className="text-sm text-foreground opacity-70">
               Showing page {pagination.page} of {pagination.totalPages} ({pagination.total} total leads)
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-3">
               <Button
                 onClick={() => setPagination(prev => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
-                disabled={pagination.page === 1}
+                disabled={pagination.page === 1 || loading}
                 variant="outline"
                 size="sm"
+                className="active:scale-95 transition-transform"
               >
                 Previous
               </Button>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-foreground opacity-70">Page</span>
+                <input
+                  type="number"
+                  min="1"
+                  max={pagination.totalPages}
+                  value={pagination.page}
+                  onChange={(e) => {
+                    const page = parseInt(e.target.value);
+                    if (page >= 1 && page <= pagination.totalPages) {
+                      setPagination(prev => ({ ...prev, page }));
+                    }
+                  }}
+                  disabled={loading}
+                  className="w-16 px-2 py-1 text-sm text-center border border-border rounded focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50"
+                />
+                <span className="text-sm text-foreground opacity-70">of {pagination.totalPages}</span>
+              </div>
               <Button
                 onClick={() => setPagination(prev => ({ ...prev, page: Math.min(prev.totalPages, prev.page + 1) }))}
-                disabled={pagination.page === pagination.totalPages}
+                disabled={pagination.page === pagination.totalPages || loading}
                 variant="outline"
                 size="sm"
+                className="active:scale-95 transition-transform"
               >
                 Next
               </Button>

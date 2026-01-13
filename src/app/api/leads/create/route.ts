@@ -43,10 +43,52 @@ export async function POST(request: NextRequest) {
     const longitude = formData.get('longitude') as string | null;
     const photo = formData.get('photo') as File | null;
 
-    // Step 5: Validate required fields
+    // Step 5: Validate required fields (all except referrer_name)
     if (!customer_name || !mobile_number) {
       return NextResponse.json(
         { error: 'Customer name and mobile number are required' },
+        { status: 400 }
+      );
+    }
+
+    if (!power_bill) {
+      return NextResponse.json(
+        { error: 'Power bill is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!units) {
+      return NextResponse.json(
+        { error: 'Units is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!address) {
+      return NextResponse.json(
+        { error: 'Address is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!status) {
+      return NextResponse.json(
+        { error: 'Status is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!latitude || !longitude) {
+      return NextResponse.json(
+        { error: 'Location (latitude and longitude) is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!photo || photo.size === 0) {
+      return NextResponse.json(
+        { error: 'Photo is required' },
         { status: 400 }
       );
     }

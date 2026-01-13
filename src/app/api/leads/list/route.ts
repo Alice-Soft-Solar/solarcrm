@@ -53,6 +53,7 @@ export async function POST(request: NextRequest) {
       singleDate = '',
       dateFrom = '',
       dateTo = '',
+      search = '',
     } = filters;
 
     // Step 5: Build query with RLS enforcement
@@ -108,23 +109,19 @@ export async function POST(request: NextRequest) {
                    .lte('created_at', toDate.toISOString());
     }
 
-    // Handle pagination
-    const requestedLimit = parseInt(limit) || 50;
-    let pageSize: number;
-    let pageNumber: number;
-    
-    if (requestedLimit >= 10000) {
-      // Fetch all leads for client-side filtering
-      pageSize = requestedLimit;
-      pageNumber = 1;
-    } else {
-      // Apply pagination
-      pageSize = Math.min(Math.max(requestedLimit, 1), 100);
-      pageNumber = Math.max(parseInt(page) || 1, 1);
-      const from = (pageNumber - 1) * pageSize;
-      const to = from + pageSize - 1;
-      query = query.range(from, to);
+    // Search filter (searches across multiple fields)
+    if (search && search.trim()) {
+      const searchTerm = search.trim();
+      query = query.or(`customer_name.ilike.%${searchTerm}%,customer_phone.ilike.%${searchTerm}%,customer_address.ilike.%${searchTerm}%`);
     }
+
+    // Handle pagination - always use server-side pagination
+    const requestedLimit = parseInt(limit) || 50;
+    const pageSize = Math.min(Math.max(requestedLimit, 1), 100);
+    const pageNumber = Math.max(parseInt(page) || 1, 1);
+    const from = (pageNumber - 1) * pageSize;
+    const to = from + pageSize - 1;
+    query = query.range(from, to);
 
     const { data, error } = await query;
 
@@ -166,6 +163,10 @@ export async function POST(request: NextRequest) {
       toDate.setHours(23, 59, 59, 999);
       countQuery = countQuery.gte('created_at', fromDate.toISOString())
                              .lte('created_at', toDate.toISOString());
+    }
+    if (search && search.trim()) {
+      const searchTerm = search.trim();
+      countQuery = countQuery.or(`customer_name.ilike.%${searchTerm}%,customer_phone.ilike.%${searchTerm}%,customer_address.ilike.%${searchTerm}%`);
     }
 
     const { count, error: countError } = await countQuery;
@@ -237,15 +238,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Calculate pagination response
-    const actualCount = requestedLimit >= 10000 ? mappedLeads.length : (count || 0);
-
     return NextResponse.json({
       leads: mappedLeads,
       pagination: {
         page: pageNumber,
         limit: pageSize,
-        total: actualCount,
-        totalPages: requestedLimit >= 10000 ? 1 : Math.ceil(actualCount / pageSize),
+        total: count || 0,
+        totalPages: Math.ceil((count || 0) / pageSize),
       },
     });
   } catch (error: unknown) {

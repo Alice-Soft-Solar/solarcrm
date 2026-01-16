@@ -26,17 +26,17 @@ export function calculateTotalPaid(payments: PaymentData[] | null | undefined): 
   return payments.reduce((total, payment) => {
     // If payment has an 'amount' field, use it (for newer payment records)
     if (payment.amount !== null && payment.amount !== undefined) {
-      return total + parseFloat(String(payment.amount) || '0');
+      return total + parseFloat(String(payment.amount));
     }
 
     // Otherwise, sum up all payment type fields (for older records or specific payment types)
-    return (
-      total +
-      parseFloat(String(payment.first_payment) || '0') +
-      parseFloat(String(payment.second_payment) || '0') +
-      parseFloat(String(payment.final_payment) || '0') +
-      parseFloat(String(payment.additional_payment) || '0')
-    );
+    // Convert null/undefined to 0 before parseFloat to avoid NaN
+    const first = payment.first_payment != null ? parseFloat(String(payment.first_payment)) : 0;
+    const second = payment.second_payment != null ? parseFloat(String(payment.second_payment)) : 0;
+    const final = payment.final_payment != null ? parseFloat(String(payment.final_payment)) : 0;
+    const additional = payment.additional_payment != null ? parseFloat(String(payment.additional_payment)) : 0;
+    
+    return total + first + second + final + additional;
   }, 0);
 }
 

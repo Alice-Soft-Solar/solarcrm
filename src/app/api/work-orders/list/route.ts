@@ -129,8 +129,8 @@ export async function POST(request: NextRequest) {
     query = query.range(from, to);
 
     // Additional filtering (RLS + manual for defense in depth)
-    if (roleName === 'Sales') {
-      // Sales see only their own work orders
+    if (roleName === 'Sales' || roleName === 'salesLead') {
+      // Sales and salesLead see only their own work orders
       query = query.eq('sales_executive_id', userId);
     } else if (roleName === 'Inventory') {
       // Inventory sees "To Be Dispatched" and "Dispatched" orders

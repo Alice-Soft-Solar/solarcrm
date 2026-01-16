@@ -2559,7 +2559,7 @@ export default function WorkOrdersListPage() {
                       <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
                         {order.customer_phone}
                       </td>
-                      {roleName !== 'Sales' && (
+                      {roleName !== 'Sales' && roleName !== 'salesLead' && (
                         <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground opacity-70">
                           {order.sales_executive_name || 'N/A'}
                         </td>

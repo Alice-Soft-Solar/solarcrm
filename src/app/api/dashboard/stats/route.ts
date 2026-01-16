@@ -178,11 +178,11 @@ export async function POST(request: NextRequest) {
         } else if (isAccounts) {
           // Accounts: See all company work orders (for count only)
           workOrdersQuery = workOrdersQuery.eq('company_id', companyId);
-        } else if (roleName === 'Sales' || roleName === 'salesLead') {
-          // Sales and Sales Lead see only their own work orders
+        } else if (roleName === 'Sales') {
+          // Sales sees only their own work orders
           workOrdersQuery = workOrdersQuery.eq('sales_executive_id', userId);
-        } else if (isAdmin) {
-          // Admin sees all company work orders
+        } else if (isSalesLead || isAdmin) {
+          // Sales Lead and Admin see all company work orders
           workOrdersQuery = workOrdersQuery.eq('company_id', companyId);
         }
 

@@ -1,20 +1,48 @@
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 
 /**
- * Utility to export data to Excel
+ * Utility to export data to Excel using ExcelJS (secure replacement for xlsx)
  * @param data - Array of objects to export
  * @param fileName - Name of the file (without extension)
  * @param sheetName - Name of the worksheet
  */
-export const exportToExcel = (data: any[], fileName: string, sheetName: string = 'Report') => {
+export const exportToExcel = async (data: any[], fileName: string, sheetName: string = 'Report') => {
   if (!data || data.length === 0) return;
 
-  const worksheet = XLSX.utils.json_to_sheet(data);
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+  // Create a new workbook and worksheet
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet(sheetName);
 
-  // Generate and download
-  XLSX.writeFile(workbook, `${fileName}_${new Date().getTime()}.xlsx`);
+  // Get headers from first object
+  const headers = Object.keys(data[0]);
+  worksheet.columns = headers.map(header => ({
+    header,
+    key: header,
+    width: 15
+  }));
+
+  // Add rows
+  data.forEach(row => {
+    worksheet.addRow(row);
+  });
+
+  // Style the header row
+  worksheet.getRow(1).font = { bold: true };
+  worksheet.getRow(1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFE0E0E0' }
+  };
+
+  // Generate buffer and trigger download
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${fileName}_${new Date().getTime()}.xlsx`;
+  link.click();
+  window.URL.revokeObjectURL(url);
 };
 
 /**

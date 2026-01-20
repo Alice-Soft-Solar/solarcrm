@@ -381,19 +381,30 @@ export default function LeadForm({
         <label className="block text-sm font-medium text-foreground">
           {isEditMode ? 'Customer Phone' : '3. Mobile Number'} {!isEditMode && <span className="text-red-500">*</span>}
         </label>
-        <input
-          type="tel"
-          value={form.mobile_number}
-          onChange={(e) =>
-            handleChange('mobile_number', e.target.value.replace(/[^0-9]/g, '').slice(0, 10))
-          }
-          placeholder="10-digit mobile (e.g. 9876543210)"
-          maxLength={10}
-          className={`block w-full rounded-md border px-3 py-2 text-sm text-foreground ${
-            validationErrors.mobile_number ? 'border-red-500 bg-red-50' : 'border-border bg-white'
-          }`}
-          disabled={isEditMode && !isAdmin}
-        />
+        <div className="flex">
+          <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-border bg-zinc-100 text-sm text-foreground">
+            +91
+          </span>
+          <input
+            type="tel"
+            value={form.mobile_number}
+            onChange={(e) => {
+              // Strip any +91/91 prefix and non-digits, keep only 10 digits
+              let value = e.target.value.replace(/[^0-9]/g, '');
+              // If user pasted number starting with 91 and it's > 10 digits, strip the 91
+              if (value.length > 10 && value.startsWith('91')) {
+                value = value.slice(2);
+              }
+              handleChange('mobile_number', value.slice(0, 10));
+            }}
+            placeholder="10-digit mobile (e.g. 9876543210)"
+            maxLength={10}
+            className={`block w-full rounded-r-md border px-3 py-2 text-sm text-foreground ${
+              validationErrors.mobile_number ? 'border-red-500 bg-red-50' : 'border-border bg-white'
+            }`}
+            disabled={isEditMode && !isAdmin}
+          />
+        </div>
         {validationErrors.mobile_number && (
           <p className="text-xs text-red-500">{validationErrors.mobile_number}</p>
         )}
@@ -497,12 +508,16 @@ export default function LeadForm({
 
       {isAdmin && !isEditMode && (
         <div className="space-y-1">
-          <label className="block text-sm font-medium text-foreground">10. Executive</label>
+          <label className="block text-sm font-medium text-foreground">
+            10. Executive <span className="text-red-500">*</span>
+          </label>
           <select
             required
             value={form.executive_id}
             onChange={(e) => handleChange('executive_id', e.target.value)}
-            className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-foreground"
+            className={`block w-full rounded-md border px-3 py-2 text-sm text-foreground ${
+              validationErrors.executive_id ? 'border-red-500 bg-red-50' : 'border-border bg-white'
+            }`}
           >
             <option value="">Select Executive</option>
             {executives.map((exec) => (
@@ -511,6 +526,9 @@ export default function LeadForm({
               </option>
             ))}
           </select>
+          {validationErrors.executive_id && (
+            <p className="text-xs text-red-500">{validationErrors.executive_id}</p>
+          )}
         </div>
       )}
 

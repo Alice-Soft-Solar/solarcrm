@@ -11,6 +11,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest } from 'next/server';
+import { debugLog } from '@/utils/logger';
 
 /**
  * Extract access token from request (multiple sources: Authorization header, body, or cookies)

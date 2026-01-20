@@ -109,10 +109,38 @@ export async function POST(request: NextRequest) {
                    .lte('created_at', toDate.toISOString());
     }
 
-    // Search filter (searches across multiple fields)
+     // Search filter (searches across multiple fields)
     if (search && search.trim()) {
-      const searchTerm = search.trim();
-      query = query.or(`customer_name.ilike.%${searchTerm}%,customer_phone.ilike.%${searchTerm}%,customer_address.ilike.%${searchTerm}%`);
+      let searchTerm = search.trim();
+      
+      // Strip +91 or 91 prefix if user searched with country code
+      if (searchTerm.startsWith('+91')) {
+        searchTerm = searchTerm.slice(3);
+      } else if (searchTerm.startsWith('91') && searchTerm.length > 10) {
+        searchTerm = searchTerm.slice(2);
+      }
+      
+      // Check if search term is numeric (phone number search)
+      const isNumeric = /^\d+$/.test(searchTerm);
+      
+      if (isNumeric) {
+        // Phone number prefix search using numeric range
+        // Since we now store only 10 digits, use maxDigits = 10
+        const searchNum = searchTerm;
+        const numDigits = searchNum.length;
+        const maxDigits = 10; // Phone numbers are stored as 10 digits only
+        
+        // Pad with zeros for lower bound, nines for upper bound
+        const paddingZeros = '0'.repeat(maxDigits - numDigits);
+        const paddingNines = '9'.repeat(maxDigits - numDigits);
+        const lowerBound = parseInt(searchNum + paddingZeros);
+        const upperBound = parseInt(searchNum + paddingNines);
+        
+        query = query.gte('customer_phone', lowerBound).lte('customer_phone', upperBound);
+      } else {
+        // Text search - only search text fields (not phone)
+        query = query.or(`customer_name.ilike.%${searchTerm}%,customer_address.ilike.%${searchTerm}%`);
+      }
     }
 
     // Handle pagination - always use server-side pagination
@@ -165,8 +193,34 @@ export async function POST(request: NextRequest) {
                              .lte('created_at', toDate.toISOString());
     }
     if (search && search.trim()) {
-      const searchTerm = search.trim();
-      countQuery = countQuery.or(`customer_name.ilike.%${searchTerm}%,customer_phone.ilike.%${searchTerm}%,customer_address.ilike.%${searchTerm}%`);
+      let searchTerm = search.trim();
+      
+      // Strip +91 or 91 prefix if user searched with country code
+      if (searchTerm.startsWith('+91')) {
+        searchTerm = searchTerm.slice(3);
+      } else if (searchTerm.startsWith('91') && searchTerm.length > 10) {
+        searchTerm = searchTerm.slice(2);
+      }
+      
+      // Check if search term is numeric (phone number search)
+      const isNumeric = /^\d+$/.test(searchTerm);
+      
+      if (isNumeric) {
+        // Phone number search using numeric range (10 digits max)
+        const searchNum = searchTerm;
+        const numDigits = searchNum.length;
+        const maxDigits = 10;
+        
+        const paddingZeros = '0'.repeat(maxDigits - numDigits);
+        const paddingNines = '9'.repeat(maxDigits - numDigits);
+        const lowerBound = parseInt(searchNum + paddingZeros);
+        const upperBound = parseInt(searchNum + paddingNines);
+        
+        countQuery = countQuery.gte('customer_phone', lowerBound).lte('customer_phone', upperBound);
+      } else {
+        // Text search - only search text fields (not phone)
+        countQuery = countQuery.or(`customer_name.ilike.%${searchTerm}%,customer_address.ilike.%${searchTerm}%`);
+      }
     }
 
     const { count, error: countError } = await countQuery;
